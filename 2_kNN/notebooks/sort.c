@@ -37,6 +37,7 @@ comp(a,b) := a < b
 
 #include <stdbool.h>
 #include <stdint.h>
+#include <stdlib.h>
 
 #define INSERTION_SORT_THRESHOLD 24
 #define NINTHER_THRESHOLD 128
@@ -46,7 +47,7 @@ typedef uint32_t u32;
 
 #define COMP(A, B) (A < B)
 
-inline void swap_u32(u32 *a, u32 *b) {
+void swap_u32(u32 *a, u32 *b) {
     u32 temp = *a;
     *a = *b;
     *b = temp;
@@ -66,7 +67,7 @@ void sort3(u32 *a, u32 *b, u32 *c) {
 
 void insertion_sort(u32 *begin, u32 *end) {
     if (begin == end) {
-        return true;
+        return;
     }
 
     for (u32 *cur = begin + 1; cur != end; ++cur) {
@@ -86,7 +87,7 @@ void insertion_sort(u32 *begin, u32 *end) {
 
 void unguarded_insertion_sort(u32 *begin, u32 *end) {
     if (begin == end) {
-        return true;
+        return;
     }
 
     for (u32 *cur = begin + 1; cur != end; ++cur) {
@@ -147,16 +148,16 @@ struct partition_result partition_right(u32 *begin, u32 *end) {
 
     // Find the first element greater than or equal than the pivot (the
     // median of 3 guarantees this exists).
-    while (comp(*++first, pivot)) {
+    while (COMP(*++first, pivot)) {
     }
 
     // Find the first element strictly smaller than the pivot. We have to
     // guard this search if there was no element before *first.
     if (first - 1 == begin) {
-        while (first < last && !comp(*--last, pivot)) {
+        while (first < last && !COMP(*--last, pivot)) {
         }
     } else {
-        while (!comp(*--last, pivot)) {
+        while (!COMP(*--last, pivot)) {
         }
     }
 
@@ -167,9 +168,9 @@ struct partition_result partition_right(u32 *begin, u32 *end) {
 
     while (first < last) {
         swap_u32(first, last);
-        while (comp(*++first, pivot)) {
+        while (COMP(*++first, pivot)) {
         }
-        while (!comp(*--last, pivot)) {
+        while (!COMP(*--last, pivot)) {
         }
     }
 
@@ -191,22 +192,22 @@ u32 *partition_left(u32 *begin, u32 *end) {
     u32 *first = begin;
     u32 *last = end;
 
-    while (comp(pivot, *--last)) {
+    while (COMP(pivot, *--last)) {
     }
 
     if (last + 1 == end) {
-        while (first < last && !comp(pivot, *++first)) {
+        while (first < last && !COMP(pivot, *++first)) {
         }
     } else {
-        while (!comp(pivot, *++first)) {
+        while (!COMP(pivot, *++first)) {
         }
     }
 
     while (first < last) {
         swap_u32(first, last);
-        while (comp(pivot, *--last)) {
+        while (COMP(pivot, *--last)) {
         }
-        while (!comp(pivot, *++first)) {
+        while (!COMP(pivot, *++first)) {
         }
     }
 
@@ -303,5 +304,18 @@ void pdqsort_loop(u32 *begin, u32 *end, bool leftmost) {
         pdqsort_loop(begin, pivot_pos, leftmost);
         begin = pivot_pos + 1;
         leftmost = false;
+    }
+}
+
+#define LEN(ARR) (sizeof(ARR) / sizeof(ARR[0]))
+#include <stdio.h>
+
+int main() {
+    u32 arr[] = {1, 8, 4, 9, 3};
+
+    insertion_sort(&arr[0], &arr[LEN(arr) -1]);
+
+    for (int i = 0; i<LEN(arr); ++i) {
+        printf("%d \n", arr[i]);
     }
 }
