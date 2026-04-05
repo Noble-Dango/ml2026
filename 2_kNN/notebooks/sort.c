@@ -65,8 +65,8 @@ void swap_u32(u32 *a, u32 *b) {
     *a = *b;
     *b = temp;
 
-    size_t index_left = (a - sorter.keys) / sizeof(u32);
-    size_t index_right = (b - sorter.keys) / sizeof(u32);
+    size_t index_left = (a - sorter.keys);
+    size_t index_right = (b - sorter.keys);
     u64 tmp = *(sorter.indices + index_left);
     sorter.indices[index_left] = *(sorter.indices + index_right);
     sorter.indices[index_right] = tmp;
@@ -92,15 +92,26 @@ void insertion_sort(u32 *begin, u32 *end) {
     for (u32 *cur = begin + 1; cur != end; ++cur) {
         u32 *sift = cur;
         u32 *sift_1 = cur - 1;
+
         if (COMP(*sift, *sift_1)) {
             u32 tmp = *sift;
+            size_t sift_at = (sift - sorter.keys);
+            u64 index = sorter.indices[sift_at];
 
             do {
-                *sift-- = *sift_1;
-                // BUG(yousef): here swap indices
+                *sift = *sift_1;
+
+                size_t sift_one_at = (sift_1 - sorter.keys);
+                sift_at = (sift - sorter.keys);
+
+                sorter.indices[sift_at] = *(sorter.indices + sift_one_at);
+
+                sift--;
             } while (sift != begin && COMP(tmp, *--sift_1));
 
             *sift = tmp;
+            sift_at = (sift - sorter.keys);
+            sorter.indices[sift_at] = index;
         }
     }
 };
@@ -113,14 +124,26 @@ void unguarded_insertion_sort(u32 *begin, u32 *end) {
     for (u32 *cur = begin + 1; cur != end; ++cur) {
         u32 *sift = cur;
         u32 *sift_1 = cur - 1;
+
         if (COMP(*sift, *sift_1)) {
             u32 tmp = *sift;
+            size_t sift_at = (sift - sorter.keys);
+            u64 index = sorter.indices[sift_at];
 
             do {
-                *sift-- = *sift_1;
+                *sift = *sift_1;
+
+                size_t sift_one_at = (sift_1 - sorter.keys);
+                sift_at = (sift - sorter.keys);
+
+                sorter.indices[sift_at] = *(sorter.indices + sift_one_at);
+
+                sift--;
             } while (COMP(tmp, *--sift_1));
 
             *sift = tmp;
+            sift_at = (sift - sorter.keys);
+            sorter.indices[sift_at] = index;
         }
     }
 };
@@ -138,12 +161,24 @@ bool partial_insertion_sort(u32 *begin, u32 *end) {
 
         if (COMP(*sift, *sift_1)) {
             u32 tmp = *sift;
+            size_t sift_at = (sift - sorter.keys);
+            u64 index = sorter.indices[sift_at];
 
             do {
-                *sift-- = *sift_1;
+                *sift = *sift_1;
+
+                size_t sift_one_at = (sift_1 - sorter.keys);
+                sift_at = (sift - sorter.keys);
+
+                sorter.indices[sift_at] = *(sorter.indices + sift_one_at);
+
+                sift--;
             } while (sift != begin && COMP(tmp, *--sift_1));
 
             *sift = tmp;
+            sift_at = (sift - sorter.keys);
+            sorter.indices[sift_at] = index;
+
             limit += cur - sift;
         }
 
@@ -162,6 +197,7 @@ struct partition_result {
 
 struct partition_result partition_right(u32 *begin, u32 *end) {
     u32 pivot = *begin;
+    size_t og_pivot_at = begin - sorter.keys;
 
     u32 *first = begin;
     u32 *last = end;
@@ -195,8 +231,16 @@ struct partition_result partition_right(u32 *begin, u32 *end) {
     }
 
     u32 *pivot_pos = first - 1;
+
     *begin = *pivot_pos;
     *pivot_pos = pivot;
+
+    size_t begin_at = begin - sorter.keys;
+    size_t pivot_pos_at = pivot_pos - sorter.keys;
+
+    u64 pivot_index = sorter.indices[og_pivot_at];
+    sorter.indices[begin_at] = sorter.indices[pivot_pos_at];
+    sorter.indices[pivot_pos_at] = pivot_index;
 
     return (struct partition_result){pivot_pos, already_partitioned};
 }
@@ -208,6 +252,7 @@ struct partition_result partition_right(u32 *begin, u32 *end) {
 // block quicksort is applied here for simplicity.
 u32 *partition_left(u32 *begin, u32 *end) {
     u32 pivot = *begin;
+    size_t og_pivot_at = begin - sorter.keys;
 
     u32 *first = begin;
     u32 *last = end;
@@ -234,6 +279,13 @@ u32 *partition_left(u32 *begin, u32 *end) {
     u32 *pivot_pos = last;
     *begin = *pivot_pos;
     *pivot_pos = pivot;
+
+    size_t begin_at = begin - sorter.keys;
+    size_t pivot_pos_at = pivot_pos - sorter.keys;
+
+    u64 pivot_index = sorter.indices[og_pivot_at];
+    sorter.indices[begin_at] = sorter.indices[pivot_pos_at];
+    sorter.indices[pivot_pos_at] = pivot_index;
 
     return pivot_pos;
 }
@@ -370,7 +422,7 @@ bool sort(u32 *keys, size_t len) {
         sorter.capacity = require / sizeof(u64);
     }
 
-    for (size_t i = 0; i < len; ++i) {
+    for (size_t i = 0; i < sorter.capacity; ++i) {
         sorter.indices[i] = i;
     }
 
@@ -415,39 +467,26 @@ void deinitialise() {
 #include <stdio.h>
 
 int main() {
-    u32 arr[] = {
-        9, 7, 1, 5, 2,
-    };
+    u32 arr[] = {183, 42,  217, 95,  6,  128, 74,  201, 33,  159, 12,  246,
+                 88,  57,  199, 141, 25, 173, 220, 3,   67,  134, 9,   182,
+                 54,  211, 97,  145, 29, 76,  238, 16,  190, 121, 44,  168,
+                 7,   154, 89,  203, 62, 115, 36,  248, 172, 81,  5,   137,
+                 224, 93,  58,  149, 27, 210, 101, 64,  187, 13,  233, 119,
+                 70,  166, 2,   198, 52, 143, 84,  226, 31,  175, 99,  140,
+                 18,  207, 60,  123, 45, 192, 8,   158};
 
-    printf("{");
-    for (int i = 0; i < LEN(arr); ++i) {
-        if (i == LEN(arr) - 1) {
-            printf("%u}\n", arr[i]);
-        } else {
-            printf("%u, ", arr[i]);
-        }
-    }
+    u32 sortable[LEN(arr)] = {0};
+    memcpy(sortable, arr, LEN(arr) * sizeof(u32));
 
-    sort(arr, LEN(arr));
-
-    printf("{");
-    for (int i = 0; i < LEN(arr); ++i) {
-        if (i == LEN(arr) - 1) {
-            printf("%u}\n", arr[i]);
-        } else {
-            printf("%u, ", arr[i]);
-        }
-    }
+    sort(sortable, LEN(arr));
 
     u64 *view;
     view_internal(&view, LEN(arr));
 
-    printf("{");
-    for (int i = 0; i < LEN(arr); ++i) {
-        if (i == LEN(arr) - 1) {
-            printf("%zu}\n", view[i]);
-        } else {
-            printf("%zu, ", view[i]);
+    for (size_t i = 0; i < LEN(arr); ++i) {
+        if (sortable[i] != arr[view[i]]) {
+            printf("[%zu] %u <=> [%zu] %u\n", i, sortable[i], view[i],
+                   arr[view[i]]);
         }
     }
 }
