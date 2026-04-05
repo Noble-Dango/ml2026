@@ -557,3 +557,94 @@ void distance_loop(float *distances, double *source, double *input,
         distances[last] = (float) result;
     }
 }
+
+struct{
+	char* stack;
+	size_t size;
+} knn_memory = {0};
+
+void init_knn() {
+	size_t size = MiB(500);
+	char* res = (char*) malloc(size);
+
+	// touch memory
+	for (size_t i = 0; i<size; ++i) {
+		res[i] = 0;
+	}
+
+	knn_memory.stack = res; 
+	knn_memory.size = size;
+}
+
+struct knn_classifier_t {
+	double* data;
+	int64_t* labels;
+	size_t height_src;
+	size_t width_src;
+
+	float* distances;
+	double* new_data;
+
+	int64_t* results;
+
+	int64_t* k_labels;
+	size_t* counts;
+
+} classifier = {0};
+
+
+void fit(double* source, int64_t* labels, size_t width, size_t height_src){
+	classifier.distances = (float*) knn_memory.stack; 
+
+	classifier.data = (double*) (knn_memory.stack + MiB(100));
+	classifier.labels = (int64_t*) (knn_memory.stack + MiB(200));
+
+	classifier.new_data = (double*) (knn_memory.stack + MiB(300));
+
+	classifier.results = (int64_t*) (knn_memory.stack + MiB(390));
+	classifier.k_labels = (int64_t*) (knn_memory.stack + MiB(400));
+
+	// must have length >= number of unique labels
+	classifier.counts = (size_t*) (knn_memory.stack + MiB(410));
+
+
+	memcpy(classifier.data, source, height_src * sizeof(double)); 
+	memcpy(classifier.labels, labels, height_src * sizeof(int64_t));
+}
+
+int64_t* predict(double* new_data, size_t width, size_t height_new, size_t k_limit) {
+	memcpy(classifier.new_data, new_data, height_new * sizeof(double));
+
+	for (size_t i = 0; i<height_new; ++i) {
+		double* input = new_data + (i*width);
+		distance_loop(classifier.distances, classifier.data, input, width, classifier.height_src);
+
+		// must compile with fno-strict-aliasing for now
+		u32* keys = (u32*) classifier.distances;
+		sort_keys(keys, classifier.height_src); 
+
+		for (size_t i = 0; i<k_limit; ++i) {
+			u64 label_at = sorter.indices[i];
+			classifier.k_labels[i] = classifier.labels[label_at];
+		}
+
+		size_t best_count = 0;
+		int64_t max_label = (-1);
+
+		size_t* counts = classifier.counts;
+
+		for (size_t i = 0; i<k_limit; ++i){
+			int64_t label = classifier.k_labels[i];
+			counts[label]++; 
+
+			if (counts[label] > best_count){
+		            best_count = counts[label];
+		            max_label = label;
+			}
+		}
+
+		classifier.results[i] = max_label;
+	}
+
+	return classifier.results;
+}
