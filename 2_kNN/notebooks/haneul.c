@@ -465,6 +465,96 @@ void deinitialise_sorter() {
 
 #define LEN(ARR) (sizeof(ARR) / sizeof((ARR)[0]))
 
-void distance_loop(float* distances, double* source, double* vector, size_t width, size_t height_src){
-	
-} 
+#include <emmintrin.h>
+
+#define SQUARE(r) (r * r)
+
+void distance_loop(float *distances, double *source, double *input,
+                   size_t width, size_t height_src) {
+
+    size_t by_two = height_src / 2;
+    size_t rest_two = height_src - by_two * 2;
+
+    for (size_t i = 0; i < by_two * 2; i += 2) {
+        double agg_one = 0.0;
+        double agg_two = 0.0;
+
+        size_t by_four = width / 4;
+        size_t rest_four = width - by_four * 4;
+
+        double *first_vec = source + i * width;
+        double *second_vec = source + (i + 1) * width;
+
+        for (size_t k = 0; k < by_four * 4; k += 4) {
+            double f_0 = first_vec[k + 0] - input[k + 0];
+            f_0 = SQUARE(f_0);
+            agg_one += f_0;
+
+            double f_1 = first_vec[k + 1] - input[k + 1];
+            f_1 = SQUARE(f_1);
+            agg_one += f_1;
+
+            double f_2 = first_vec[k + 2] - input[k + 2];
+            f_2 = SQUARE(f_2);
+            agg_one += f_2;
+
+            double f_3 = first_vec[k + 3] - input[k + 3];
+            f_3 = SQUARE(f_3);
+            agg_one += f_3;
+
+            double r_0 = second_vec[k + 0] - input[k + 0];
+            r_0 = SQUARE(r_0);
+            agg_two += r_0;
+
+            double r_1 = second_vec[k + 1] - input[k + 1];
+            r_1 = SQUARE(r_1);
+            agg_two += r_1;
+
+            double r_2 = second_vec[k + 2] - input[k + 2];
+            r_2 = SQUARE(r_2);
+            agg_two += r_2;
+
+            double r_3 = second_vec[k + 3] - input[k + 3];
+            r_3 = SQUARE(r_3);
+            agg_two += r_3;
+        }
+
+        for (size_t l = by_four * 4; l < width; ++l) {
+            double f_0 = first_vec[l] - input[l];
+            f_0 = SQUARE(f_0);
+            agg_one += f_0;
+
+            double r_0 = second_vec[l] - input[l];
+            r_0 = SQUARE(r_0);
+            agg_two += r_0;
+        }
+
+        __m128d packed_two = _mm_set_pd(agg_two, agg_one);
+        __m128d packed_sqrts = _mm_sqrt_pd(packed_two);
+
+        double out[2];
+        _mm_storeu_pd(out, packed_sqrts);
+
+        distances[i] = out[0];
+        distances[i + 1] = out[1];
+    }
+
+    if (rest_two == 1) { // it can only be 1 or 0
+        size_t last = (height_src - 1);
+
+        double agg = 0.0;
+        double *current = source + last * width;
+        for (size_t k = 0; k < width; ++k) {
+            double f_0 = current[k] - input[k];
+            f_0 = SQUARE(f_0);
+            agg += f_0;
+        }
+
+        __m128d scalar_agg = _mm_set_sd(agg);
+        __m128d sqrt_agg = _mm_sqrt_sd(scalar_agg, scalar_agg);
+
+        double result = _mm_cvtsd_f64(sqrt_agg);
+
+        distances[last] = result;
+    }
+}
