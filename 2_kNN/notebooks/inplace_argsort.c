@@ -394,13 +394,14 @@ void pdqsort(u32 *begin, u32 *end) {
 #define INIT_SIZE MiB(1)
 #define ALIGN_PAGE(n) (n % KiB(4) ? n + (KiB(4) - n % KiB(4)) : n)
 
-bool sort(u32 *keys, size_t len) {
+bool sort_keys(u32 *keys, size_t len) {
     sorter.keys = keys;
 
     if (sorter.indices == NULL) {
         size_t require = sizeof(u64) * len;
 
-        size_t size = max(require, INIT_SIZE);
+        size_t size = INIT_SIZE > require ? INIT_SIZE : require;
+
         size = ALIGN_PAGE(size);
 
         void *res = malloc(size);
@@ -463,30 +464,3 @@ void deinitialise() {
 };
 
 #define LEN(ARR) (sizeof(ARR) / sizeof((ARR)[0]))
-#include <assert.h>
-#include <stdio.h>
-
-int main() {
-    u32 arr[] = {183, 42,  217, 95,  6,  128, 74,  201, 33,  159, 12,  246,
-                 88,  57,  199, 141, 25, 173, 220, 3,   67,  134, 9,   182,
-                 54,  211, 97,  145, 29, 76,  238, 16,  190, 121, 44,  168,
-                 7,   154, 89,  203, 62, 115, 36,  248, 172, 81,  5,   137,
-                 224, 93,  58,  149, 27, 210, 101, 64,  187, 13,  233, 119,
-                 70,  166, 2,   198, 52, 143, 84,  226, 31,  175, 99,  140,
-                 18,  207, 60,  123, 45, 192, 8,   158};
-
-    u32 sortable[LEN(arr)] = {0};
-    memcpy(sortable, arr, LEN(arr) * sizeof(u32));
-
-    sort(sortable, LEN(arr));
-
-    u64 *view;
-    view_internal(&view, LEN(arr));
-
-    for (size_t i = 0; i < LEN(arr); ++i) {
-        if (sortable[i] != arr[view[i]]) {
-            printf("[%zu] %u <=> [%zu] %u\n", i, sortable[i], view[i],
-                   arr[view[i]]);
-        }
-    }
-}
