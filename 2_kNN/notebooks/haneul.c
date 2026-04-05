@@ -458,9 +458,13 @@ bool copy_indices(u64 *dest_container, size_t how_many) {
     return true;
 }
 
-void deinitialise() {
+void deinitialise_sorter() {
     free(sorter.indices);
     sorter = (struct sorter_t){0};
 };
 
 #define LEN(ARR) (sizeof(ARR) / sizeof((ARR)[0]))
+
+void distance_loop(float* distances, double* source, double* vector, size_t width, size_t height_src){
+	
+} 
