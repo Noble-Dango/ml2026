@@ -467,7 +467,7 @@ void deinitialise_sorter() {
 
 #include <emmintrin.h>
 
-#define SQUARE(r) (r * r)
+#define SQUARE(r) ((r) * (r))
 
 void distance_loop(float *distances, double *source, double *input,
                    size_t width, size_t height_src) {
@@ -480,7 +480,6 @@ void distance_loop(float *distances, double *source, double *input,
         double agg_two = 0.0;
 
         size_t by_four = width / 4;
-        size_t rest_four = width - by_four * 4;
 
         double *first_vec = source + i * width;
         double *second_vec = source + (i + 1) * width;
@@ -535,8 +534,8 @@ void distance_loop(float *distances, double *source, double *input,
         double out[2];
         _mm_storeu_pd(out, packed_sqrts);
 
-        distances[i] = out[0];
-        distances[i + 1] = out[1];
+        distances[i] = (float) out[0];
+        distances[i + 1] = (float) out[1];
     }
 
     if (rest_two == 1) { // it can only be 1 or 0
@@ -555,6 +554,6 @@ void distance_loop(float *distances, double *source, double *input,
 
         double result = _mm_cvtsd_f64(sqrt_agg);
 
-        distances[last] = result;
+        distances[last] = (float) result;
     }
 }
