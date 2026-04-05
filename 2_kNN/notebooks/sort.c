@@ -1,6 +1,6 @@
 /*
-This is a custom implementation of pdqsort in which I cut out C++ features and
-restrict the type of keys to u32.
+This file includes a custom implementation of pdqsort in which I cut out C++
+features and restrict the type of keys to u32.
 
 Credits to Orson Peters <orsonpeters@gmail.com>.
 See https://github.com/orlp/pdqsort
@@ -38,19 +38,38 @@ comp(a,b) := a < b
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <string.h>
 
 #define INSERTION_SORT_THRESHOLD 24
 #define NINTHER_THRESHOLD 128
 #define PARTIAL_INSERTION_SORT_LIMIT 8
 
 typedef uint32_t u32;
+typedef uint64_t u64;
 
 #define COMP(A, B) (A < B)
+
+struct sorter_t {
+    u64 *indices;
+    // strictly speaking, capacity != occupied, but this is
+    // enough to prevent reading outside bounds (in view_indices and
+    // copy_indices), and that's what I care about
+    size_t capacity;
+    u32 *keys;
+};
+
+struct sorter_t sorter = {0};
 
 void swap_u32(u32 *a, u32 *b) {
     u32 temp = *a;
     *a = *b;
     *b = temp;
+
+    size_t index_left = (a - sorter.keys) / sizeof(u32);
+    size_t index_right = (b - sorter.keys) / sizeof(u32);
+    u64 tmp = *(sorter.indices + index_left);
+    sorter.indices[index_left] = *(sorter.indices + index_right);
+    sorter.indices[index_right] = tmp;
 }
 
 void sort2(u32 *a, u32 *b) {
@@ -78,6 +97,7 @@ void insertion_sort(u32 *begin, u32 *end) {
 
             do {
                 *sift-- = *sift_1;
+                // BUG(yousef): here swap indices
             } while (sift != begin && COMP(tmp, *--sift_1));
 
             *sift = tmp;
@@ -307,15 +327,127 @@ void pdqsort_loop(u32 *begin, u32 *end, bool leftmost) {
     }
 }
 
-#define LEN(ARR) (sizeof(ARR) / sizeof(ARR[0]))
+void pdqsort(u32 *begin, u32 *end) {
+    if (begin == end)
+        return;
+
+#define INIT_PDQSORT_CALL true
+    pdqsort_loop(begin, end, INIT_PDQSORT_CALL);
+}
+
+#define KiB(n) (n * 1024)
+#define MiB(n) (KiB(n) * 1024)
+#define GiB(n) (MiB(n) * 1024)
+
+#define INIT_SIZE MiB(1)
+#define ALIGN_PAGE(n) (n % KiB(4) ? n + (KiB(4) - n % KiB(4)) : n)
+
+bool sort(u32 *keys, size_t len) {
+    sorter.keys = keys;
+
+    if (sorter.indices == NULL) {
+        size_t require = sizeof(u64) * len;
+
+        size_t size = max(require, INIT_SIZE);
+        size = ALIGN_PAGE(size);
+
+        void *res = malloc(size);
+        if (res == NULL) {
+            return false;
+        }
+
+        sorter.indices = (u64 *)res;
+        sorter.capacity = size / sizeof(u64);
+    } else if (sorter.capacity < len) {
+        size_t require = ALIGN_PAGE(sizeof(u64) * len);
+
+        void *res = realloc(sorter.indices, require);
+        if (res == NULL) {
+            return false;
+        }
+
+        sorter.indices = res;
+        sorter.capacity = require / sizeof(u64);
+    }
+
+    for (size_t i = 0; i < len; ++i) {
+        sorter.indices[i] = i;
+    }
+
+    pdqsort(sorter.keys, sorter.keys + len);
+    return true;
+}
+
+bool view_internal(u64 **indices, size_t how_many) {
+    if (sorter.indices == NULL) {
+        return false;
+    }
+    if (how_many > sorter.capacity) {
+        return false;
+    }
+
+    *indices = sorter.indices;
+
+    return true;
+}
+
+bool copy_indices(u64 *dest_container, size_t how_many) {
+    if (sorter.indices == NULL) {
+        return false;
+    }
+
+    if (how_many > sorter.capacity) {
+        return false;
+    }
+
+    memcpy(dest_container, sorter.indices, how_many * sizeof(u64));
+
+    return true;
+}
+
+void deinitialise() {
+    free(sorter.indices);
+    sorter = (struct sorter_t){0};
+};
+
+#define LEN(ARR) (sizeof(ARR) / sizeof((ARR)[0]))
+#include <assert.h>
 #include <stdio.h>
 
 int main() {
-    u32 arr[] = {1, 8, 4, 9, 3};
+    u32 arr[] = {
+        9, 7, 1, 5, 2,
+    };
 
-    insertion_sort(&arr[0], &arr[LEN(arr) -1]);
+    printf("{");
+    for (int i = 0; i < LEN(arr); ++i) {
+        if (i == LEN(arr) - 1) {
+            printf("%u}\n", arr[i]);
+        } else {
+            printf("%u, ", arr[i]);
+        }
+    }
 
-    for (int i = 0; i<LEN(arr); ++i) {
-        printf("%d \n", arr[i]);
+    sort(arr, LEN(arr));
+
+    printf("{");
+    for (int i = 0; i < LEN(arr); ++i) {
+        if (i == LEN(arr) - 1) {
+            printf("%u}\n", arr[i]);
+        } else {
+            printf("%u, ", arr[i]);
+        }
+    }
+
+    u64 *view;
+    view_internal(&view, LEN(arr));
+
+    printf("{");
+    for (int i = 0; i < LEN(arr); ++i) {
+        if (i == LEN(arr) - 1) {
+            printf("%zu}\n", view[i]);
+        } else {
+            printf("%zu, ", view[i]);
+        }
     }
 }
