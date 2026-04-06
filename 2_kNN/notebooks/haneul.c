@@ -13,7 +13,7 @@ numbers can be sorted as integers (both in the 32 and 64 bit format).
 https://www.researchgate.net/publication/342347690_RadixInsert_a_much_faster_stable_algorithm_for_sorting_floating-point_numbers
 
 A given euclidean distance can only ever be positive.
-Therefore, we may sort the array of distances as if they were integers.
+Therefore, we may sort the array of nodistances as if they were integers.
 
 Note 2:
 In the original pdqsort source code, Compare is used.
@@ -423,7 +423,7 @@ bool sort_keys(u32 *keys, size_t len) {
         sorter.capacity = require / sizeof(u64);
     }
 
-    for (size_t i = 0; i < sorter.capacity; ++i) {
+    for (size_t i = 0; i<len; ++i) {
         sorter.indices[i] = i;
     }
 
@@ -564,7 +564,7 @@ struct{
 } knn_memory = {0};
 
 void init_knn() {
-	size_t size = MiB(500);
+	size_t size = MiB(70);
 	char* res = (char*) malloc(size);
 
 	// touch memory
@@ -590,32 +590,40 @@ struct knn_classifier_t {
 	int64_t* k_labels;
 	size_t* counts;
 
+    size_t max_label; 
 } classifier = {0};
 
 
-void fit(double* source, int64_t* labels, size_t width, size_t height_src){
+int fit(double* source, int64_t* labels, size_t width, size_t height_src, size_t max_label){
+    classifier.height_src = height_src;
+    classifier.width_src = width;
+
+    classifier.max_label = max_label;
+
 	classifier.distances = (float*) knn_memory.stack; 
 
-	classifier.data = (double*) (knn_memory.stack + MiB(100));
-	classifier.labels = (int64_t*) (knn_memory.stack + MiB(200));
+	classifier.data = (double*) (knn_memory.stack + MiB(2));
+	classifier.labels = (int64_t*) (knn_memory.stack + MiB(4));
 
-	classifier.new_data = (double*) (knn_memory.stack + MiB(300));
+	classifier.new_data = (double*) (knn_memory.stack + MiB(8));
 
-	classifier.results = (int64_t*) (knn_memory.stack + MiB(390));
-	classifier.k_labels = (int64_t*) (knn_memory.stack + MiB(400));
+	classifier.results = (int64_t*) (knn_memory.stack + MiB(16));
+	classifier.k_labels = (int64_t*) (knn_memory.stack + MiB(32));
 
 	// must have length >= number of unique labels
-	classifier.counts = (size_t*) (knn_memory.stack + MiB(410));
+	classifier.counts = (size_t*) (knn_memory.stack + MiB(64));
 
-
-	memcpy(classifier.data, source, height_src * sizeof(double)); 
+	memcpy(classifier.data, source, height_src * width *  sizeof(double)); 
 	memcpy(classifier.labels, labels, height_src * sizeof(int64_t));
+
+    return (1);
 }
 
 int64_t* predict(double* new_data, size_t width, size_t height_new, size_t k_limit) {
-	memcpy(classifier.new_data, new_data, height_new * sizeof(double));
+	memcpy(classifier.new_data, new_data, height_new * width * sizeof(double));
 
 	for (size_t i = 0; i<height_new; ++i) {
+        memset(classifier.counts, '\0', classifier.max_label * sizeof(size_t));
 		double* input = new_data + (i*width);
 		distance_loop(classifier.distances, classifier.data, input, width, classifier.height_src);
 
@@ -623,9 +631,9 @@ int64_t* predict(double* new_data, size_t width, size_t height_new, size_t k_lim
 		u32* keys = (u32*) classifier.distances;
 		sort_keys(keys, classifier.height_src); 
 
-		for (size_t i = 0; i<k_limit; ++i) {
-			u64 label_at = sorter.indices[i];
-			classifier.k_labels[i] = classifier.labels[label_at];
+		for (size_t u = 0; u<k_limit; ++u) {
+			u64 label_at = sorter.indices[u];
+			classifier.k_labels[u] = classifier.labels[label_at];
 		}
 
 		size_t best_count = 0;
@@ -633,8 +641,8 @@ int64_t* predict(double* new_data, size_t width, size_t height_new, size_t k_lim
 
 		size_t* counts = classifier.counts;
 
-		for (size_t i = 0; i<k_limit; ++i){
-			int64_t label = classifier.k_labels[i];
+		for (size_t u = 0; u<k_limit; ++u){
+			int64_t label = classifier.k_labels[u];
 			counts[label]++; 
 
 			if (counts[label] > best_count){
