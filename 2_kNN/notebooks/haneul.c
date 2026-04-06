@@ -471,23 +471,6 @@ void deinitialise_sorter() {
     sorter = (struct sorter_t){0};
 };
 
-u32 *lomuto_partition(u32 *left, u32 *right, u32 *pivot) {
-    u32 pivot_val = *pivot;
-
-    swap_u32(right, pivot);
-
-    u32 *store_index = left;
-
-    for (u32 *ptr = left; ptr < right; ptr++) {
-        if (*ptr < pivot_val) {
-            swap_u32(store_index, ptr);
-            store_index++;
-        }
-    }
-    swap_u32(right, store_index);
-    return store_index;
-}
-
 // quickselect: returns pointer to the kth element
 // for all e between base and &k: e =< k
 u32 *quickselect(u32 *keys, size_t len, size_t count_k) {
@@ -500,7 +483,7 @@ u32 *quickselect(u32 *keys, size_t len, size_t count_k) {
             return left;
         }
 
-        u32 *pivot = partition_right(left, right).pivot_at;
+        u32 *pivot = partition_left(left, right);
 
         size_t pivot_index = pivot - sorter.keys;
 
