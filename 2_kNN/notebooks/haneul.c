@@ -1,11 +1,22 @@
 /*
+Author: Yousef Ammar
+
 This file includes a custom implementation of pdqsort in which I cut out C++
 features and restrict the type of keys to u32.
-
 Credits to Orson Peters <orsonpeters@gmail.com>.
 See https://github.com/orlp/pdqsort
 and https://arxiv.org/abs/2106.05123.
-The original source code is provided under the terms of the zlib license.
+The original source code for pdqsort is provided under the terms of the zlib
+license.
+
+I disclaim copyright for my own code.
+In place of a legal notice,
+
+
+
+Note 0:
+The file is split into sections marked by comments. Searching for "SECTION"
+should help you navigate.
 
 Note 1:
 The IEE754 standard was deliberately made such that positive floating-point
@@ -13,26 +24,20 @@ numbers can be sorted as integers (both in the 32 and 64 bit format).
 https://www.researchgate.net/publication/342347690_RadixInsert_a_much_faster_stable_algorithm_for_sorting_floating-point_numbers
 
 A given euclidean distance can only ever be positive.
-Therefore, we may sort the array of nodistances as if they were integers.
+Therefore, we may sort the array of distances as if they were integers.
 
 Note 2:
-In the original pdqsort source code, Compare is used.
+A full sort of the keys (distances) is not employed, instead I use the partition
+routine to implement quickselect (the pseudocode of which is taken from
+wikipedia).
 
-https://en.cppreference.com/w/cpp/named_req/Compare.html
-https://en.wikipedia.org/wiki/Weak_ordering#Strict_weak_orderings
+Nevertheless, I used sort_keys (which calls pdqsort_loop) in the beginning to
+develop the classifier and later for testing.
 
-The return value of the function call operation applied to an object of a type
-satisfying Compare, when converted to bool, yields (1) true if the first
-argument of the call appears before the second in the strict weak ordering
-relation induced by this type, and false otherwise.
+Note 3:
 
-Establishes strict weak ordering relation with the following properties:
-For all a, comp(a, a) == false.
-If comp(a, b) == true then comp(b, a) == false.
-if comp(a, b) == true and comp(b, c) == true then comp(a, c) == true.
+Note 4:
 
-In our case, this is sufficient for u32:
-comp(a,b) := a < b
 */
 
 #include <stdbool.h>
@@ -43,6 +48,8 @@ comp(a,b) := a < b
 typedef uint32_t u32;
 typedef uint64_t u64;
 
+#define THREAD_COUNT 8
+
 /**********************************************/
 /* SECTION SORTING */
 /**********************************************/
@@ -52,18 +59,14 @@ typedef uint64_t u64;
 
 #define COMP(A, B) (A < B)
 
-struct sorter_t {
-    u64 *indices;
-    // strictly speaking, capacity != occupied, but this is
-    // enough to prevent reading outside bounds (in view_indices and
-    // copy_indices), and that's what I care about
-    size_t capacity;
+struct sorter {
     u32 *keys;
-};
+    u64 *indices;
+} sorters[THREAD_COUNT] = {0};
 
-struct sorter_t sorter = {0};
+void swap_u32(u32 *a, u32 *b, size_t thread_idx) {
+    struct sorter sorter = sorters[thread_idx];
 
-void swap_u32(u32 *a, u32 *b) {
     u32 temp = *a;
     *a = *b;
     *b = temp;
@@ -75,19 +78,21 @@ void swap_u32(u32 *a, u32 *b) {
     sorter.indices[index_right] = tmp;
 }
 
-void sort2(u32 *a, u32 *b) {
+void sort2(u32 *a, u32 *b, size_t thread_idx) {
     if (COMP(*b, *a)) {
-        swap_u32(a, b);
+        swap_u32(a, b, thread_idx);
     }
 }
 
-void sort3(u32 *a, u32 *b, u32 *c) {
-    sort2(a, b);
-    sort2(b, c);
-    sort2(a, b);
+void sort3(u32 *a, u32 *b, u32 *c, size_t thread_idx) {
+    sort2(a, b, thread_idx);
+    sort2(b, c, thread_idx);
+    sort2(a, b, thread_idx);
 }
 
-void insertion_sort(u32 *begin, u32 *end) {
+void insertion_sort(u32 *begin, u32 *end, size_t thread_idx) {
+    struct sorter sorter = sorters[thread_idx];
+
     if (begin == end) {
         return;
     }
@@ -119,7 +124,9 @@ void insertion_sort(u32 *begin, u32 *end) {
     }
 };
 
-void unguarded_insertion_sort(u32 *begin, u32 *end) {
+void unguarded_insertion_sort(u32 *begin, u32 *end, size_t thread_idx) {
+    struct sorter sorter = sorters[thread_idx];
+
     if (begin == end) {
         return;
     }
@@ -151,7 +158,9 @@ void unguarded_insertion_sort(u32 *begin, u32 *end) {
     }
 };
 
-bool partial_insertion_sort(u32 *begin, u32 *end) {
+bool partial_insertion_sort(u32 *begin, u32 *end, size_t thread_idx) {
+    struct sorter sorter = sorters[thread_idx];
+
     if (begin == end) {
         return true;
     }
@@ -198,7 +207,9 @@ struct partition_result {
     bool already_partitioned;
 };
 
-struct partition_result partition_right(u32 *begin, u32 *end) {
+struct partition_result partition_right(u32 *begin, u32 *end,
+                                        size_t thread_idx) {
+    struct sorter sorter = sorters[thread_idx];
     u32 pivot = *begin;
     size_t og_pivot_at = begin - sorter.keys;
 
@@ -226,7 +237,7 @@ struct partition_result partition_right(u32 *begin, u32 *end) {
     bool already_partitioned = first >= last;
 
     while (first < last) {
-        swap_u32(first, last);
+        swap_u32(first, last, thread_idx);
         while (COMP(*++first, pivot)) {
         }
         while (!COMP(*--last, pivot)) {
@@ -253,7 +264,9 @@ struct partition_result partition_right(u32 *begin, u32 *end) {
 // sequence already was partitioned. Since this is rarely used (the many
 // equal case), and in that case pdqsort already has O(n) performance, no
 // block quicksort is applied here for simplicity.
-u32 *partition_left(u32 *begin, u32 *end) {
+u32 *partition_left(u32 *begin, u32 *end, size_t thread_idx) {
+    struct sorter sorter = sorters[thread_idx];
+
     u32 pivot = *begin;
     size_t og_pivot_at = begin - sorter.keys;
 
@@ -272,7 +285,7 @@ u32 *partition_left(u32 *begin, u32 *end) {
     }
 
     while (first < last) {
-        swap_u32(first, last);
+        swap_u32(first, last, thread_idx);
         while (COMP(pivot, *--last)) {
         }
         while (!COMP(pivot, *++first)) {
@@ -293,29 +306,29 @@ u32 *partition_left(u32 *begin, u32 *end) {
     return pivot_pos;
 }
 
-void pdqsort_loop(u32 *begin, u32 *end, bool leftmost) {
+void pdqsort_loop(u32 *begin, u32 *end, bool leftmost, size_t thread_idx) {
     while (true) {
         size_t size = end - begin;
 
         if (size < INSERTION_SORT_THRESHOLD) {
             if (leftmost) {
-                insertion_sort(begin, end);
+                insertion_sort(begin, end, thread_idx);
             } else {
-                unguarded_insertion_sort(begin, end);
+                unguarded_insertion_sort(begin, end, thread_idx);
             }
             return;
         }
 
         size_t s2 = size / 2;
         if (size > NINTHER_THRESHOLD) {
-            sort3(begin, begin + s2, end - 1);
-            sort3(begin + 1, begin + (s2 - 1), end - 2);
-            sort3(begin + 2, begin + (s2 + 1), end - 3);
-            sort3(begin + (s2 - 1), begin + s2, begin + (s2 + 1));
+            sort3(begin, begin + s2, end - 1, thread_idx);
+            sort3(begin + 1, begin + (s2 - 1), end - 2, thread_idx);
+            sort3(begin + 2, begin + (s2 + 1), end - 3, thread_idx);
+            sort3(begin + (s2 - 1), begin + s2, begin + (s2 + 1), thread_idx);
 
-            swap_u32(begin, begin + s2);
+            swap_u32(begin, begin + s2, thread_idx);
         } else {
-            sort3(begin + s2, begin, end - 1);
+            sort3(begin + s2, begin, end - 1, thread_idx);
         }
 
         // If *(begin - 1) is the end of the right partition of a previous
@@ -326,11 +339,11 @@ void pdqsort_loop(u32 *begin, u32 *end, bool leftmost) {
         // not have to recurse on the left partition, since it's sorted (all
         // equal).
         if (!leftmost && !COMP(*(begin - 1), *begin)) {
-            begin = partition_left(begin, end) + 1;
+            begin = partition_left(begin, end, thread_idx) + 1;
             continue;
         }
 
-        struct partition_result res = partition_right(begin, end);
+        struct partition_result res = partition_right(begin, end, thread_idx);
         u32 *pivot_pos = res.pivot_at;
         bool already_partitioned = res.already_partitioned;
 
@@ -342,26 +355,31 @@ void pdqsort_loop(u32 *begin, u32 *end, bool leftmost) {
             // TODO(yousef): bad_allowed == 0? then sort_heap
 
             if (l_size >= INSERTION_SORT_THRESHOLD) {
-                swap_u32(begin, begin + l_size / 4);
-                swap_u32(pivot_pos - 1, pivot_pos - l_size / 4);
+                swap_u32(begin, begin + l_size / 4, thread_idx);
+                swap_u32(pivot_pos - 1, pivot_pos - l_size / 4, thread_idx);
 
                 if (l_size > NINTHER_THRESHOLD) {
-                    swap_u32(begin + 1, begin + (l_size / 4 + 1));
-                    swap_u32(begin + 2, begin + (l_size / 4 + 2));
-                    swap_u32(pivot_pos - 2, pivot_pos - (l_size / 4 + 1));
-                    swap_u32(pivot_pos - 3, pivot_pos - (l_size / 4 + 2));
+                    swap_u32(begin + 1, begin + (l_size / 4 + 1), thread_idx);
+                    swap_u32(begin + 2, begin + (l_size / 4 + 2), thread_idx);
+                    swap_u32(pivot_pos - 2, pivot_pos - (l_size / 4 + 1),
+                             thread_idx);
+                    swap_u32(pivot_pos - 3, pivot_pos - (l_size / 4 + 2),
+                             thread_idx);
                 }
             }
 
             if (r_size >= INSERTION_SORT_THRESHOLD) {
-                swap_u32(pivot_pos + 1, pivot_pos + (1 + r_size / 4));
-                swap_u32(end - 1, end - r_size / 4);
+                swap_u32(pivot_pos + 1, pivot_pos + (1 + r_size / 4),
+                         thread_idx);
+                swap_u32(end - 1, end - r_size / 4, thread_idx);
 
                 if (r_size > NINTHER_THRESHOLD) {
-                    swap_u32(pivot_pos + 2, pivot_pos + (2 + r_size / 4));
-                    swap_u32(pivot_pos + 3, pivot_pos + (3 + r_size / 4));
-                    swap_u32(end - 2, end - (1 + r_size / 4));
-                    swap_u32(end - 3, end - (2 + r_size / 4));
+                    swap_u32(pivot_pos + 2, pivot_pos + (2 + r_size / 4),
+                             thread_idx);
+                    swap_u32(pivot_pos + 3, pivot_pos + (3 + r_size / 4),
+                             thread_idx);
+                    swap_u32(end - 2, end - (1 + r_size / 4), thread_idx);
+                    swap_u32(end - 3, end - (2 + r_size / 4), thread_idx);
                 }
             }
 
@@ -369,25 +387,25 @@ void pdqsort_loop(u32 *begin, u32 *end, bool leftmost) {
             // If we were decently balanced and we tried to sort an already
             // partitioned sequence try to use insertion sort.
             if (already_partitioned &&
-                partial_insertion_sort(begin, pivot_pos) &&
-                partial_insertion_sort(pivot_pos + 1, end))
+                partial_insertion_sort(begin, pivot_pos, thread_idx) &&
+                partial_insertion_sort(pivot_pos + 1, end, thread_idx))
                 return;
         }
 
         // Sort the left partition first using recursion and do tail
         // recursion elimination for the right-hand partition.
-        pdqsort_loop(begin, pivot_pos, leftmost);
+        pdqsort_loop(begin, pivot_pos, leftmost, thread_idx);
         begin = pivot_pos + 1;
         leftmost = false;
     }
 }
 
-void pdqsort(u32 *begin, u32 *end) {
+void pdqsort(u32 *begin, u32 *end, size_t thread_idx) {
     if (begin == end)
         return;
 
 #define INIT_PDQSORT_CALL true
-    pdqsort_loop(begin, end, INIT_PDQSORT_CALL);
+    pdqsort_loop(begin, end, INIT_PDQSORT_CALL, thread_idx);
 }
 
 #define KiB(n) (n * 1024)
@@ -397,93 +415,38 @@ void pdqsort(u32 *begin, u32 *end) {
 #define INIT_SIZE MiB(1)
 #define ALIGN_PAGE(n) (n % KiB(4) ? n + (KiB(4) - n % KiB(4)) : n)
 
-bool init_sorter(u32 *keys, size_t len) {
-    sorter.keys = keys;
+void init_sorter(size_t len, size_t thread_idx) {
+    struct sorter sorter = sorters[thread_idx];
 
-    if (sorter.indices == NULL) {
-        size_t require = sizeof(u64) * len;
-
-        size_t size = INIT_SIZE > require ? INIT_SIZE : require;
-
-        size = ALIGN_PAGE(size);
-
-        void *res = malloc(size);
-        if (res == NULL) {
-            return false;
-        }
-
-        sorter.indices = (u64 *)res;
-        sorter.capacity = size / sizeof(u64);
-    } else if (sorter.capacity < len) {
-        size_t require = ALIGN_PAGE(sizeof(u64) * len);
-
-        void *res = realloc(sorter.indices, require);
-        if (res == NULL) {
-            return false;
-        }
-
-        sorter.indices = res;
-        sorter.capacity = require / sizeof(u64);
-    }
-
-    for (size_t i = 0; i < len; ++i) {
+    for (u64 i = 0; i < len; ++i) {
         sorter.indices[i] = i;
     }
-    return true;
 }
 
-bool sort_keys(u32 *keys, size_t len) {
-    init_sorter(keys, len);
+bool sort_keys(u32 *keys, size_t len, size_t thread_idx) {
+    struct sorter sorter = sorters[thread_idx];
 
-    pdqsort(sorter.keys, sorter.keys + len);
+    init_sorter(len, thread_idx);
+
+    pdqsort(sorter.keys, sorter.keys + len, thread_idx);
     return true;
 }
-
-bool view_internal(u64 **indices, size_t how_many) {
-    if (sorter.indices == NULL) {
-        return false;
-    }
-    if (how_many > sorter.capacity) {
-        return false;
-    }
-
-    *indices = sorter.indices;
-
-    return true;
-}
-
-bool copy_indices(u64 *dest_container, size_t how_many) {
-    if (sorter.indices == NULL) {
-        return false;
-    }
-
-    if (how_many > sorter.capacity) {
-        return false;
-    }
-
-    memcpy(dest_container, sorter.indices, how_many * sizeof(u64));
-
-    return true;
-}
-
-void deinitialise_sorter() {
-    free(sorter.indices);
-    sorter = (struct sorter_t){0};
-};
 
 // quickselect: returns pointer to the kth element
 // for all e between base and &k: e =< k
-u32 *quickselect(u32 *keys, size_t len, size_t count_k) {
+u32 *quickselect(u32 *keys, size_t len, size_t count_k, size_t thread_idx) {
+    struct sorter sorter = sorters[thread_idx];
+
     u32 *left = keys;
     u32 *right = keys + len;
-    init_sorter(keys, len);
+    init_sorter(len, thread_idx);
 
     while (true) {
         if (left == right) {
             return left;
         }
 
-        u32 *pivot = partition_left(left, right);
+        u32 *pivot = partition_left(left, right, thread_idx);
 
         size_t pivot_index = pivot - sorter.keys;
 
@@ -506,78 +469,58 @@ u32 *quickselect(u32 *keys, size_t len, size_t count_k) {
 
 void distance_loop(float *distances, double *source, double *input,
                    size_t width, size_t height_src) {
+    size_t height_by_four = height_src / 4;
+    size_t height_rest_four = height_src - height_by_four * 4;
 
-    size_t by_two = height_src / 2;
-    size_t rest_two = height_src - by_two * 2;
-
-    for (size_t i = 0; i < by_two * 2; i += 2) {
-        double agg_one = 0.0;
-        double agg_two = 0.0;
-
-        size_t by_four = width / 4;
-
+    for (size_t i = 0; i < height_by_four * 4; i += 4) {
         double *first_vec = source + i * width;
         double *second_vec = source + (i + 1) * width;
+        double *third_vec = source + (i + 2) * width;
+        double *fourth_vec = source + (i + 3) * width;
 
-        for (size_t k = 0; k < by_four * 4; k += 4) {
-            double f_0 = first_vec[k + 0] - input[k + 0];
-            f_0 = SQUARE(f_0);
-            agg_one += f_0;
+        double agg_one = 0.0;
+        double agg_two = 0.0;
+        double agg_three = 0.0;
+        double agg_four = 0.0;
 
-            double f_1 = first_vec[k + 1] - input[k + 1];
-            f_1 = SQUARE(f_1);
-            agg_one += f_1;
-
-            double f_2 = first_vec[k + 2] - input[k + 2];
-            f_2 = SQUARE(f_2);
-            agg_one += f_2;
-
-            double f_3 = first_vec[k + 3] - input[k + 3];
-            f_3 = SQUARE(f_3);
-            agg_one += f_3;
-
-            double r_0 = second_vec[k + 0] - input[k + 0];
-            r_0 = SQUARE(r_0);
-            agg_two += r_0;
-
-            double r_1 = second_vec[k + 1] - input[k + 1];
-            r_1 = SQUARE(r_1);
-            agg_two += r_1;
-
-            double r_2 = second_vec[k + 2] - input[k + 2];
-            r_2 = SQUARE(r_2);
-            agg_two += r_2;
-
-            double r_3 = second_vec[k + 3] - input[k + 3];
-            r_3 = SQUARE(r_3);
-            agg_two += r_3;
-        }
-
-        for (size_t l = by_four * 4; l < width; ++l) {
+        // NOTE(yousef): I do not expect the features vector (the innermost) to
+        // be so wide as to benefit from manual vectorisation.
+        for (size_t l = 0; l < width; ++l) {
             double f_0 = first_vec[l] - input[l];
             f_0 = SQUARE(f_0);
             agg_one += f_0;
 
-            double r_0 = second_vec[l] - input[l];
-            r_0 = SQUARE(r_0);
-            agg_two += r_0;
+            double g_0 = second_vec[l] - input[l];
+            g_0 = SQUARE(g_0);
+            agg_two += g_0;
+
+            double h_0 = third_vec[l] - input[l];
+            h_0 = SQUARE(h_0);
+            agg_three += h_0;
+
+            double j_0 = fourth_vec[l] - input[l];
+            j_0 = SQUARE(j_0);
+            agg_four += j_0;
         }
 
-        __m128d packed_two = _mm_set_pd(agg_two, agg_one);
-        __m128d packed_sqrts = _mm_sqrt_pd(packed_two);
+        __m128 packed_singles =
+            _mm_set_ps(agg_four, agg_three, agg_two, agg_one);
 
-        double out[2];
-        _mm_storeu_pd(out, packed_sqrts);
+        __m128 packed_sqrts = _mm_sqrt_ps(packed_singles); // losing precision
+
+        float out[4];
+        _mm_storeu_ps(out, packed_sqrts);
 
         distances[i] = (float)out[0];
         distances[i + 1] = (float)out[1];
+        distances[i + 2] = (float)out[2];
+        distances[i + 3] = (float)out[3];
     }
 
-    if (rest_two == 1) { // it can only be 1 or 0
-        size_t last = (height_src - 1);
-
+    for (size_t i = height_by_four * 4; i < height_src; ++i) {
+        double *current = source + i * width;
         double agg = 0.0;
-        double *current = source + last * width;
+
         for (size_t k = 0; k < width; ++k) {
             double f_0 = current[k] - input[k];
             f_0 = SQUARE(f_0);
@@ -589,9 +532,10 @@ void distance_loop(float *distances, double *source, double *input,
 
         double result = _mm_cvtsd_f64(sqrt_agg);
 
-        distances[last] = (float)result;
+        distances[i] = (float)result;
     }
 }
+
 /**********************************************/
 /* SECTION DISTANCE KNN-CLASSIFIER */
 /**********************************************/
@@ -600,8 +544,23 @@ struct {
     size_t size;
 } knn_memory = {0};
 
+struct knn_classifier_t {
+    double *data;
+    int64_t *labels;
+
+    size_t max_label;
+    size_t height_src;
+    size_t width_src;
+
+    char *thread_mem[THREAD_COUNT];
+
+    double *new_data;
+
+    int64_t *results;
+} classifier = {0};
+
 void init_knn() {
-    size_t size = MiB(70);
+    size_t size = MiB(300);
     char *res = (char *)malloc(size);
 
     // touch memory
@@ -611,24 +570,18 @@ void init_knn() {
 
     knn_memory.stack = res;
     knn_memory.size = size;
+
+    for (size_t i = 0; i < THREAD_COUNT; ++i) {
+        classifier.thread_mem[i] = knn_memory.stack + i * MiB(20);
+    }
+
+    classifier.data = (double *)(knn_memory.stack + MiB(200));
+    classifier.labels = (int64_t *)(knn_memory.stack + MiB(210));
+
+    classifier.new_data = (double *)(knn_memory.stack + MiB(220));
+
+    classifier.results = (int64_t *)(knn_memory.stack + MiB(230));
 }
-
-struct knn_classifier_t {
-    double *data;
-    int64_t *labels;
-    size_t height_src;
-    size_t width_src;
-
-    float *distances;
-    double *new_data;
-
-    int64_t *results;
-
-    int64_t *k_labels;
-    size_t *counts;
-
-    size_t max_label;
-} classifier = {0};
 
 int fit(double *source, int64_t *labels, size_t width, size_t height_src,
         size_t max_label) {
@@ -637,60 +590,158 @@ int fit(double *source, int64_t *labels, size_t width, size_t height_src,
 
     classifier.max_label = max_label;
 
-    classifier.distances = (float *)knn_memory.stack;
-
-    classifier.data = (double *)(knn_memory.stack + MiB(2));
-    classifier.labels = (int64_t *)(knn_memory.stack + MiB(4));
-
-    classifier.new_data = (double *)(knn_memory.stack + MiB(8));
-
-    classifier.results = (int64_t *)(knn_memory.stack + MiB(16));
-    classifier.k_labels = (int64_t *)(knn_memory.stack + MiB(32));
-
-    // must have length >= number of unique labels
-    classifier.counts = (size_t *)(knn_memory.stack + MiB(64));
-
     memcpy(classifier.data, source, height_src * width * sizeof(double));
     memcpy(classifier.labels, labels, height_src * sizeof(int64_t));
 
     return (1);
 }
 
+#ifdef _WIN32
+#include <Windows.h>
+#include <stdio.h>
+#else
+#endif
+
+struct predict_params_t {
+    double *new_data;
+    size_t width;
+    size_t height_new;
+    size_t k_limit;
+    size_t thread_idx;
+};
+
+// correct labels stored at classifier.results
+// distances, counts, k_labels part of the same memory
+// classifier.distances_mem0
+// also a single sorter.indices no longer works
+void predict_multithreaded(struct predict_params_t params) {
+    size_t thread_idx = params.thread_idx;
+
+    char *memory = classifier.thread_mem[thread_idx];
+    float *distance_mem = memory;
+    size_t *label_counts = memory + MiB(5);
+    int64_t *k_labels = memory + MiB(5) + KiB(200);
+    u64 *indices = memory + MiB(5) + KiB(400);
+
+    double *data_per_thread = memory + MiB(10);
+    memcpy(data_per_thread, classifier.data,
+           classifier.height_src * classifier.width_src * sizeof(double));
+
+    int64_t *labels_per_thread = memory + MiB(15);
+    memcpy(labels_per_thread, classifier.labels,
+           classifier.height_src * sizeof(int64_t));
+
+    sorters[thread_idx].indices = indices;
+    sorters[thread_idx].keys = (u32 *)distance_mem;
+
+    size_t routines_count = params.height_new;
+    size_t routines_per_thread = routines_count / THREAD_COUNT;
+    size_t leftover_routines = routines_count % THREAD_COUNT;
+
+    size_t first_vector_this_thread = routines_per_thread * thread_idx;
+    size_t one_past_last_vector_this_thread =
+        first_vector_this_thread + routines_per_thread;
+
+    for (size_t i = first_vector_this_thread;
+         i < one_past_last_vector_this_thread; ++i) {
+        memset(label_counts, '\0', classifier.max_label * sizeof(size_t));
+
+        double *vector = params.new_data + i * params.width;
+
+        distance_loop(distance_mem, data_per_thread, vector,
+                      classifier.width_src, classifier.height_src);
+
+        // must compile with fno-strict-aliasing for now
+        u32 *keys = (u32 *)distance_mem;
+        quickselect(keys, classifier.height_src, params.k_limit, thread_idx);
+
+        for (size_t u = 0; u < params.k_limit; ++u) {
+            u64 label_at = sorters[thread_idx].indices[u];
+            k_labels[u] = labels_per_thread[label_at];
+        }
+
+        size_t best_count = 0;
+        int64_t best_label = (-1);
+
+        for (size_t u = 0; u < params.k_limit; ++u) {
+            int64_t label = k_labels[u];
+            label_counts[label]++;
+
+            if (label_counts[label] > best_count) {
+                best_count = label_counts[label];
+                best_label = label;
+            }
+        }
+
+        classifier.results[i] = best_label;
+    }
+
+    if (thread_idx == 0) {
+        for (size_t i = routines_per_thread * THREAD_COUNT; i < routines_count;
+             ++i) {
+
+            memset(label_counts, '\0', classifier.max_label * sizeof(size_t));
+
+            double *vector = params.new_data + i * params.width;
+
+            distance_loop(distance_mem, data_per_thread, vector,
+                          classifier.width_src, classifier.height_src);
+
+            // must compile with fno-strict-aliasing for now
+            u32 *keys = (u32 *)distance_mem;
+            quickselect(keys, classifier.height_src, params.k_limit,
+                        thread_idx);
+
+            for (size_t u = 0; u < params.k_limit; ++u) {
+                u64 label_at = sorters[thread_idx].indices[u];
+                k_labels[u] = labels_per_thread[label_at];
+            }
+
+            size_t best_count = 0;
+            int64_t best_label = (-1);
+
+            for (size_t u = 0; u < params.k_limit; ++u) {
+                int64_t label = k_labels[u];
+                label_counts[label]++;
+
+                if (label_counts[label] > best_count) {
+                    best_count = label_counts[label];
+                    best_label = label;
+                }
+            }
+
+            classifier.results[i] = best_label;
+        }
+    }
+}
+
+DWORD WINAPI StartWorkWin32(LPVOID lpParameter) {
+    predict_multithreaded(*(struct predict_params_t *)lpParameter);
+}
+
+#define FEATURE_MULTITHREADED
 int64_t *predict(double *new_data, size_t width, size_t height_new,
                  size_t k_limit) {
     memcpy(classifier.new_data, new_data, height_new * width * sizeof(double));
 
-    for (size_t i = 0; i < height_new; ++i) {
-        memset(classifier.counts, '\0', classifier.max_label * sizeof(size_t));
-        double *input = new_data + (i * width);
-        distance_loop(classifier.distances, classifier.data, input, width,
-                      classifier.height_src);
+    HANDLE threads[THREAD_COUNT] = {0};
 
-        // must compile with fno-strict-aliasing for now
-        u32 *keys = (u32 *)classifier.distances;
-        quickselect(keys, classifier.height_src, k_limit);
+    struct predict_params_t parameters[THREAD_COUNT] = {0};
 
-        for (size_t u = 0; u < k_limit; ++u) {
-            u64 label_at = sorter.indices[u];
-            classifier.k_labels[u] = classifier.labels[label_at];
-        }
+    for (size_t thread_idx = 0; thread_idx < THREAD_COUNT; thread_idx += 1) {
+        parameters[thread_idx].new_data = classifier.new_data;
+        parameters[thread_idx].width = width;
+        parameters[thread_idx].height_new = height_new;
+        parameters[thread_idx].k_limit = k_limit;
+        parameters[thread_idx].thread_idx = thread_idx;
 
-        size_t best_count = 0;
-        int64_t max_label = (-1);
+        DWORD ThreadID;
+        threads[thread_idx] = CreateThread(
+            0, 0, StartWorkWin32, &parameters[thread_idx], 0, &ThreadID);
+    }
 
-        size_t *counts = classifier.counts;
-
-        for (size_t u = 0; u < k_limit; ++u) {
-            int64_t label = classifier.k_labels[u];
-            counts[label]++;
-
-            if (counts[label] > best_count) {
-                best_count = counts[label];
-                max_label = label;
-            }
-        }
-
-        classifier.results[i] = max_label;
+    for (size_t thread_idx = 0; thread_idx < THREAD_COUNT; thread_idx += 1) {
+        WaitForMultipleObjects(THREAD_COUNT, threads, true, INFINITE);
     }
 
     return classifier.results;
