@@ -40,12 +40,15 @@ comp(a,b) := a < b
 #include <stdlib.h>
 #include <string.h>
 
+typedef uint32_t u32;
+typedef uint64_t u64;
+
+/**********************************************/
+/* SECTION SORTING */
+/**********************************************/
 #define INSERTION_SORT_THRESHOLD 24
 #define NINTHER_THRESHOLD 128
 #define PARTIAL_INSERTION_SORT_LIMIT 8
-
-typedef uint32_t u32;
-typedef uint64_t u64;
 
 #define COMP(A, B) (A < B)
 
@@ -394,7 +397,7 @@ void pdqsort(u32 *begin, u32 *end) {
 #define INIT_SIZE MiB(1)
 #define ALIGN_PAGE(n) (n % KiB(4) ? n + (KiB(4) - n % KiB(4)) : n)
 
-bool sort_keys(u32 *keys, size_t len) {
+bool init_sorter(u32 *keys, size_t len) {
     sorter.keys = keys;
 
     if (sorter.indices == NULL) {
@@ -423,9 +426,14 @@ bool sort_keys(u32 *keys, size_t len) {
         sorter.capacity = require / sizeof(u64);
     }
 
-    for (size_t i = 0; i<len; ++i) {
+    for (size_t i = 0; i < len; ++i) {
         sorter.indices[i] = i;
     }
+    return true;
+}
+
+bool sort_keys(u32 *keys, size_t len) {
+    init_sorter(keys, len);
 
     pdqsort(sorter.keys, sorter.keys + len);
     return true;
@@ -463,8 +471,52 @@ void deinitialise_sorter() {
     sorter = (struct sorter_t){0};
 };
 
-#define LEN(ARR) (sizeof(ARR) / sizeof((ARR)[0]))
+u32 *lomuto_partition(u32 *left, u32 *right, u32 *pivot) {
+    u32 pivot_val = *pivot;
 
+    swap_u32(right, pivot);
+
+    u32 *store_index = left;
+
+    for (u32 *ptr = left; ptr < right; ptr++) {
+        if (*ptr < pivot_val) {
+            swap_u32(store_index, ptr);
+            store_index++;
+        }
+    }
+    swap_u32(right, store_index);
+    return store_index;
+}
+
+// quickselect: returns pointer to the kth element
+// for all e between base and &k: e =< k
+u32 *quickselect(u32 *keys, size_t len, size_t count_k) {
+    u32 *left = keys;
+    u32 *right = keys + len;
+    init_sorter(keys, len);
+
+    while (true) {
+        if (left == right) {
+            return left;
+        }
+
+        u32 *pivot = partition_right(left, right).pivot_at;
+
+        size_t pivot_index = pivot - sorter.keys;
+
+        if (count_k == pivot_index) {
+            return pivot;
+        } else if (count_k < pivot_index) {
+            right -= 1;
+        } else {
+            left += 1;
+        }
+    }
+}
+
+/**********************************************/
+/* SECTION DISTANCE CALCULATION */
+/**********************************************/
 #include <emmintrin.h>
 
 #define SQUARE(r) ((r) * (r))
@@ -534,8 +586,8 @@ void distance_loop(float *distances, double *source, double *input,
         double out[2];
         _mm_storeu_pd(out, packed_sqrts);
 
-        distances[i] = (float) out[0];
-        distances[i + 1] = (float) out[1];
+        distances[i] = (float)out[0];
+        distances[i + 1] = (float)out[1];
     }
 
     if (rest_two == 1) { // it can only be 1 or 0
@@ -554,105 +606,109 @@ void distance_loop(float *distances, double *source, double *input,
 
         double result = _mm_cvtsd_f64(sqrt_agg);
 
-        distances[last] = (float) result;
+        distances[last] = (float)result;
     }
 }
-
-struct{
-	char* stack;
-	size_t size;
+/**********************************************/
+/* SECTION DISTANCE KNN-CLASSIFIER */
+/**********************************************/
+struct {
+    char *stack;
+    size_t size;
 } knn_memory = {0};
 
 void init_knn() {
-	size_t size = MiB(70);
-	char* res = (char*) malloc(size);
+    size_t size = MiB(70);
+    char *res = (char *)malloc(size);
 
-	// touch memory
-	for (size_t i = 0; i<size; ++i) {
-		res[i] = 0;
-	}
+    // touch memory
+    for (size_t i = 0; i < size; ++i) {
+        res[i] = 0;
+    }
 
-	knn_memory.stack = res; 
-	knn_memory.size = size;
+    knn_memory.stack = res;
+    knn_memory.size = size;
 }
 
 struct knn_classifier_t {
-	double* data;
-	int64_t* labels;
-	size_t height_src;
-	size_t width_src;
+    double *data;
+    int64_t *labels;
+    size_t height_src;
+    size_t width_src;
 
-	float* distances;
-	double* new_data;
+    float *distances;
+    double *new_data;
 
-	int64_t* results;
+    int64_t *results;
 
-	int64_t* k_labels;
-	size_t* counts;
+    int64_t *k_labels;
+    size_t *counts;
 
-    size_t max_label; 
+    size_t max_label;
 } classifier = {0};
 
-
-int fit(double* source, int64_t* labels, size_t width, size_t height_src, size_t max_label){
+int fit(double *source, int64_t *labels, size_t width, size_t height_src,
+        size_t max_label) {
     classifier.height_src = height_src;
     classifier.width_src = width;
 
     classifier.max_label = max_label;
 
-	classifier.distances = (float*) knn_memory.stack; 
+    classifier.distances = (float *)knn_memory.stack;
 
-	classifier.data = (double*) (knn_memory.stack + MiB(2));
-	classifier.labels = (int64_t*) (knn_memory.stack + MiB(4));
+    classifier.data = (double *)(knn_memory.stack + MiB(2));
+    classifier.labels = (int64_t *)(knn_memory.stack + MiB(4));
 
-	classifier.new_data = (double*) (knn_memory.stack + MiB(8));
+    classifier.new_data = (double *)(knn_memory.stack + MiB(8));
 
-	classifier.results = (int64_t*) (knn_memory.stack + MiB(16));
-	classifier.k_labels = (int64_t*) (knn_memory.stack + MiB(32));
+    classifier.results = (int64_t *)(knn_memory.stack + MiB(16));
+    classifier.k_labels = (int64_t *)(knn_memory.stack + MiB(32));
 
-	// must have length >= number of unique labels
-	classifier.counts = (size_t*) (knn_memory.stack + MiB(64));
+    // must have length >= number of unique labels
+    classifier.counts = (size_t *)(knn_memory.stack + MiB(64));
 
-	memcpy(classifier.data, source, height_src * width *  sizeof(double)); 
-	memcpy(classifier.labels, labels, height_src * sizeof(int64_t));
+    memcpy(classifier.data, source, height_src * width * sizeof(double));
+    memcpy(classifier.labels, labels, height_src * sizeof(int64_t));
 
     return (1);
 }
 
-int64_t* predict(double* new_data, size_t width, size_t height_new, size_t k_limit) {
-	memcpy(classifier.new_data, new_data, height_new * width * sizeof(double));
+int64_t *predict(double *new_data, size_t width, size_t height_new,
+                 size_t k_limit) {
+    memcpy(classifier.new_data, new_data, height_new * width * sizeof(double));
 
-	for (size_t i = 0; i<height_new; ++i) {
+    for (size_t i = 0; i < height_new; ++i) {
         memset(classifier.counts, '\0', classifier.max_label * sizeof(size_t));
-		double* input = new_data + (i*width);
-		distance_loop(classifier.distances, classifier.data, input, width, classifier.height_src);
+        double *input = new_data + (i * width);
+        distance_loop(classifier.distances, classifier.data, input, width,
+                      classifier.height_src);
 
-		// must compile with fno-strict-aliasing for now
-		u32* keys = (u32*) classifier.distances;
-		sort_keys(keys, classifier.height_src); 
+        // must compile with fno-strict-aliasing for now
+        u32 *keys = (u32 *)classifier.distances;
+        quickselect(keys, classifier.height_src, k_limit);
 
-		for (size_t u = 0; u<k_limit; ++u) {
-			u64 label_at = sorter.indices[u];
-			classifier.k_labels[u] = classifier.labels[label_at];
-		}
+        for (size_t u = 0; u < k_limit; ++u) {
+            u64 label_at = sorter.indices[u];
+            classifier.k_labels[u] = classifier.labels[label_at];
+        }
 
-		size_t best_count = 0;
-		int64_t max_label = (-1);
+        size_t best_count = 0;
+        int64_t max_label = (-1);
 
-		size_t* counts = classifier.counts;
+        size_t *counts = classifier.counts;
 
-		for (size_t u = 0; u<k_limit; ++u){
-			int64_t label = classifier.k_labels[u];
-			counts[label]++; 
+        for (size_t u = 0; u < k_limit; ++u) {
+            int64_t label = classifier.k_labels[u];
+            counts[label]++;
 
-			if (counts[label] > best_count){
-		            best_count = counts[label];
-		            max_label = label;
-			}
-		}
+            if (counts[label] > best_count) {
+                best_count = counts[label];
+                max_label = label;
+            }
+        }
 
-		classifier.results[i] = max_label;
-	}
+        classifier.results[i] = max_label;
+    }
 
-	return classifier.results;
+    return classifier.results;
 }

@@ -2,3 +2,5 @@
 *.exe
 build/
 *.so
+
+test_win32.c
