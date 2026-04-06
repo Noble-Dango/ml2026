@@ -9,19 +9,37 @@ and https://arxiv.org/abs/2106.05123.
 The original source code for pdqsort is provided under the terms of the zlib
 license.
 
-I disclaim copyright for my own code.
-In place of a legal notice,
+The structure of the multithreaded section of the code is adapted from Ryan
+Fleury's own. See https://www.dgtlgrove.com/p/multi-core-by-default.
 
+I disclaim copyright to my own code.
+In place of a legal notice, here is a short poem:
 
+    I long to feel no shame
+    As I look up at the sky.
+    A mere breeze,
+    Stirring the leaves,
+    Pained my heart.
+    With a heart that sings of the stars,
+    I’ll love all dying things.
+    And I must fare the path
+    That’s been allotted to me.
+    Tonight, also,
+    The winds sweep over the stars.
+    —Yoon Dong Ju, Prelude
+
+*****
+GENERAL COMMENTS
 
 Note 0:
 The file is split into sections marked by comments. Searching for "SECTION"
 should help you navigate.
 
 Note 1:
-The IEE754 standard was deliberately made such that positive floating-point
-numbers can be sorted as integers (both in the 32 and 64 bit format).
-https://www.researchgate.net/publication/342347690_RadixInsert_a_much_faster_stable_algorithm_for_sorting_floating-point_numbers
+'The IEE754 standard was deliberately made such that positive floating-point
+numbers can be sorted as integers (both in the 32 and 64 bit format).'
+(Source:
+https://www.researchgate.net/publication/342347690_RadixInsert_a_much_faster_stable_algorithm_for_sorting_floating-point_numbers)
 
 A given euclidean distance can only ever be positive.
 Therefore, we may sort the array of distances as if they were integers.
@@ -33,11 +51,6 @@ wikipedia).
 
 Nevertheless, I used sort_keys (which calls pdqsort_loop) in the beginning to
 develop the classifier and later for testing.
-
-Note 3:
-
-Note 4:
-
 */
 
 #include <stdbool.h>
@@ -537,7 +550,7 @@ void distance_loop(float *distances, double *source, double *input,
 }
 
 /**********************************************/
-/* SECTION DISTANCE KNN-CLASSIFIER */
+/* SECTION KNN-CLASSIFIER */
 /**********************************************/
 struct {
     char *stack;
@@ -598,7 +611,6 @@ int fit(double *source, int64_t *labels, size_t width, size_t height_src,
 
 #ifdef _WIN32
 #include <Windows.h>
-#include <stdio.h>
 #else
 #endif
 
@@ -611,9 +623,6 @@ struct predict_params_t {
 };
 
 // correct labels stored at classifier.results
-// distances, counts, k_labels part of the same memory
-// classifier.distances_mem0
-// also a single sorter.indices no longer works
 void predict_multithreaded(struct predict_params_t params) {
     size_t thread_idx = params.thread_idx;
 
@@ -622,14 +631,6 @@ void predict_multithreaded(struct predict_params_t params) {
     size_t *label_counts = memory + MiB(5);
     int64_t *k_labels = memory + MiB(5) + KiB(200);
     u64 *indices = memory + MiB(5) + KiB(400);
-
-    double *data_per_thread = memory + MiB(10);
-    memcpy(data_per_thread, classifier.data,
-           classifier.height_src * classifier.width_src * sizeof(double));
-
-    int64_t *labels_per_thread = memory + MiB(15);
-    memcpy(labels_per_thread, classifier.labels,
-           classifier.height_src * sizeof(int64_t));
 
     sorters[thread_idx].indices = indices;
     sorters[thread_idx].keys = (u32 *)distance_mem;
@@ -648,7 +649,7 @@ void predict_multithreaded(struct predict_params_t params) {
 
         double *vector = params.new_data + i * params.width;
 
-        distance_loop(distance_mem, data_per_thread, vector,
+        distance_loop(distance_mem, classifier.data, vector,
                       classifier.width_src, classifier.height_src);
 
         // must compile with fno-strict-aliasing for now
@@ -657,7 +658,7 @@ void predict_multithreaded(struct predict_params_t params) {
 
         for (size_t u = 0; u < params.k_limit; ++u) {
             u64 label_at = sorters[thread_idx].indices[u];
-            k_labels[u] = labels_per_thread[label_at];
+            k_labels[u] = classifier.labels[label_at];
         }
 
         size_t best_count = 0;
@@ -684,7 +685,7 @@ void predict_multithreaded(struct predict_params_t params) {
 
             double *vector = params.new_data + i * params.width;
 
-            distance_loop(distance_mem, data_per_thread, vector,
+            distance_loop(distance_mem, classifier.data, vector,
                           classifier.width_src, classifier.height_src);
 
             // must compile with fno-strict-aliasing for now
@@ -694,7 +695,7 @@ void predict_multithreaded(struct predict_params_t params) {
 
             for (size_t u = 0; u < params.k_limit; ++u) {
                 u64 label_at = sorters[thread_idx].indices[u];
-                k_labels[u] = labels_per_thread[label_at];
+                k_labels[u] = classifier.labels[label_at];
             }
 
             size_t best_count = 0;
@@ -719,7 +720,6 @@ DWORD WINAPI StartWorkWin32(LPVOID lpParameter) {
     predict_multithreaded(*(struct predict_params_t *)lpParameter);
 }
 
-#define FEATURE_MULTITHREADED
 int64_t *predict(double *new_data, size_t width, size_t height_new,
                  size_t k_limit) {
     memcpy(classifier.new_data, new_data, height_new * width * sizeof(double));
