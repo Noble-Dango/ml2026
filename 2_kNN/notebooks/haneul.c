@@ -26,7 +26,8 @@ In place of a legal notice, here is a short poem:
     That’s been allotted to me.
     Tonight, also,
     The winds sweep over the stars.
-    —Yoon Dong Ju, Prelude
+
+    --Yoon Dong Ju, Prelude
 
 *****
 GENERAL COMMENTS
@@ -72,40 +73,31 @@ typedef uint64_t u64;
 
 #define COMP(A, B) (A < B)
 
-struct sorter {
-    u32 *keys;
-    u64 *indices;
-} sorters[THREAD_COUNT] = {0};
-
-void swap_u32(u32 *a, u32 *b, size_t thread_idx) {
-    struct sorter sorter = sorters[thread_idx];
-
+void swap_u32(u32 *a, u32 *b, u32 *keys, u64 *indices) {
     u32 temp = *a;
     *a = *b;
     *b = temp;
 
-    size_t index_left = (a - sorter.keys);
-    size_t index_right = (b - sorter.keys);
-    u64 tmp = *(sorter.indices + index_left);
-    sorter.indices[index_left] = *(sorter.indices + index_right);
-    sorter.indices[index_right] = tmp;
+    size_t index_left = (a - keys);
+    size_t index_right = (b - keys);
+    u64 tmp = *(indices + index_left);
+    indices[index_left] = *(indices + index_right);
+    indices[index_right] = tmp;
 }
 
-void sort2(u32 *a, u32 *b, size_t thread_idx) {
+void sort2(u32 *a, u32 *b, u32 *keys, u64 *indices) {
     if (COMP(*b, *a)) {
-        swap_u32(a, b, thread_idx);
+        swap_u32(a, b, keys, indices);
     }
 }
 
-void sort3(u32 *a, u32 *b, u32 *c, size_t thread_idx) {
-    sort2(a, b, thread_idx);
-    sort2(b, c, thread_idx);
-    sort2(a, b, thread_idx);
+void sort3(u32 *a, u32 *b, u32 *c, u32 *keys, u64 *indices) {
+    sort2(a, b, keys, indices);
+    sort2(b, c, keys, indices);
+    sort2(a, b, keys, indices);
 }
 
-void insertion_sort(u32 *begin, u32 *end, size_t thread_idx) {
-    struct sorter sorter = sorters[thread_idx];
-
+void insertion_sort(u32 *begin, u32 *end, u32 *keys, u64 *indices) {
     if (begin == end) {
         return;
     }
@@ -116,30 +108,28 @@ void insertion_sort(u32 *begin, u32 *end, size_t thread_idx) {
 
         if (COMP(*sift, *sift_1)) {
             u32 tmp = *sift;
-            size_t sift_at = (sift - sorter.keys);
-            u64 index = sorter.indices[sift_at];
+            size_t sift_at = (sift - keys);
+            u64 index = indices[sift_at];
 
             do {
                 *sift = *sift_1;
 
-                size_t sift_one_at = (sift_1 - sorter.keys);
-                sift_at = (sift - sorter.keys);
+                size_t sift_one_at = (sift_1 - keys);
+                sift_at = (sift - keys);
 
-                sorter.indices[sift_at] = *(sorter.indices + sift_one_at);
+                indices[sift_at] = *(indices + sift_one_at);
 
                 sift--;
             } while (sift != begin && COMP(tmp, *--sift_1));
 
             *sift = tmp;
-            sift_at = (sift - sorter.keys);
-            sorter.indices[sift_at] = index;
+            sift_at = (sift - keys);
+            indices[sift_at] = index;
         }
     }
 };
 
-void unguarded_insertion_sort(u32 *begin, u32 *end, size_t thread_idx) {
-    struct sorter sorter = sorters[thread_idx];
-
+void unguarded_insertion_sort(u32 *begin, u32 *end, u32 *keys, u64 *indices) {
     if (begin == end) {
         return;
     }
@@ -150,30 +140,28 @@ void unguarded_insertion_sort(u32 *begin, u32 *end, size_t thread_idx) {
 
         if (COMP(*sift, *sift_1)) {
             u32 tmp = *sift;
-            size_t sift_at = (sift - sorter.keys);
-            u64 index = sorter.indices[sift_at];
+            size_t sift_at = (sift - keys);
+            u64 index = indices[sift_at];
 
             do {
                 *sift = *sift_1;
 
-                size_t sift_one_at = (sift_1 - sorter.keys);
-                sift_at = (sift - sorter.keys);
+                size_t sift_one_at = (sift_1 - keys);
+                sift_at = (sift - keys);
 
-                sorter.indices[sift_at] = *(sorter.indices + sift_one_at);
+                indices[sift_at] = *(indices + sift_one_at);
 
                 sift--;
             } while (COMP(tmp, *--sift_1));
 
             *sift = tmp;
-            sift_at = (sift - sorter.keys);
-            sorter.indices[sift_at] = index;
+            sift_at = (sift - keys);
+            indices[sift_at] = index;
         }
     }
 };
 
-bool partial_insertion_sort(u32 *begin, u32 *end, size_t thread_idx) {
-    struct sorter sorter = sorters[thread_idx];
-
+bool partial_insertion_sort(u32 *begin, u32 *end, u32 *keys, u64 *indices) {
     if (begin == end) {
         return true;
     }
@@ -186,23 +174,23 @@ bool partial_insertion_sort(u32 *begin, u32 *end, size_t thread_idx) {
 
         if (COMP(*sift, *sift_1)) {
             u32 tmp = *sift;
-            size_t sift_at = (sift - sorter.keys);
-            u64 index = sorter.indices[sift_at];
+            size_t sift_at = (sift - keys);
+            u64 index = indices[sift_at];
 
             do {
                 *sift = *sift_1;
 
-                size_t sift_one_at = (sift_1 - sorter.keys);
-                sift_at = (sift - sorter.keys);
+                size_t sift_one_at = (sift_1 - keys);
+                sift_at = (sift - keys);
 
-                sorter.indices[sift_at] = *(sorter.indices + sift_one_at);
+                indices[sift_at] = *(indices + sift_one_at);
 
                 sift--;
             } while (sift != begin && COMP(tmp, *--sift_1));
 
             *sift = tmp;
-            sift_at = (sift - sorter.keys);
-            sorter.indices[sift_at] = index;
+            sift_at = (sift - keys);
+            indices[sift_at] = index;
 
             limit += cur - sift;
         }
@@ -220,11 +208,10 @@ struct partition_result {
     bool already_partitioned;
 };
 
-struct partition_result partition_right(u32 *begin, u32 *end,
-                                        size_t thread_idx) {
-    struct sorter sorter = sorters[thread_idx];
+struct partition_result partition_right(u32 *begin, u32 *end, u32 *keys,
+                                        u64 *indices) {
     u32 pivot = *begin;
-    size_t og_pivot_at = begin - sorter.keys;
+    size_t og_pivot_at = begin - keys;
 
     u32 *first = begin;
     u32 *last = end;
@@ -250,7 +237,7 @@ struct partition_result partition_right(u32 *begin, u32 *end,
     bool already_partitioned = first >= last;
 
     while (first < last) {
-        swap_u32(first, last, thread_idx);
+        swap_u32(first, last, keys, indices);
         while (COMP(*++first, pivot)) {
         }
         while (!COMP(*--last, pivot)) {
@@ -262,12 +249,12 @@ struct partition_result partition_right(u32 *begin, u32 *end,
     *begin = *pivot_pos;
     *pivot_pos = pivot;
 
-    size_t begin_at = begin - sorter.keys;
-    size_t pivot_pos_at = pivot_pos - sorter.keys;
+    size_t begin_at = begin - keys;
+    size_t pivot_pos_at = pivot_pos - keys;
 
-    u64 pivot_index = sorter.indices[og_pivot_at];
-    sorter.indices[begin_at] = sorter.indices[pivot_pos_at];
-    sorter.indices[pivot_pos_at] = pivot_index;
+    u64 pivot_index = indices[og_pivot_at];
+    indices[begin_at] = indices[pivot_pos_at];
+    indices[pivot_pos_at] = pivot_index;
 
     return (struct partition_result){pivot_pos, already_partitioned};
 }
@@ -277,11 +264,9 @@ struct partition_result partition_right(u32 *begin, u32 *end,
 // sequence already was partitioned. Since this is rarely used (the many
 // equal case), and in that case pdqsort already has O(n) performance, no
 // block quicksort is applied here for simplicity.
-u32 *partition_left(u32 *begin, u32 *end, size_t thread_idx) {
-    struct sorter sorter = sorters[thread_idx];
-
+u32 *partition_left(u32 *begin, u32 *end, u32 *keys, u64 *indices) {
     u32 pivot = *begin;
-    size_t og_pivot_at = begin - sorter.keys;
+    size_t og_pivot_at = begin - keys;
 
     u32 *first = begin;
     u32 *last = end;
@@ -298,7 +283,7 @@ u32 *partition_left(u32 *begin, u32 *end, size_t thread_idx) {
     }
 
     while (first < last) {
-        swap_u32(first, last, thread_idx);
+        swap_u32(first, last, keys, indices);
         while (COMP(pivot, *--last)) {
         }
         while (!COMP(pivot, *++first)) {
@@ -309,39 +294,41 @@ u32 *partition_left(u32 *begin, u32 *end, size_t thread_idx) {
     *begin = *pivot_pos;
     *pivot_pos = pivot;
 
-    size_t begin_at = begin - sorter.keys;
-    size_t pivot_pos_at = pivot_pos - sorter.keys;
+    size_t begin_at = begin - keys;
+    size_t pivot_pos_at = pivot_pos - keys;
 
-    u64 pivot_index = sorter.indices[og_pivot_at];
-    sorter.indices[begin_at] = sorter.indices[pivot_pos_at];
-    sorter.indices[pivot_pos_at] = pivot_index;
+    u64 pivot_index = indices[og_pivot_at];
+    indices[begin_at] = indices[pivot_pos_at];
+    indices[pivot_pos_at] = pivot_index;
 
     return pivot_pos;
 }
 
-void pdqsort_loop(u32 *begin, u32 *end, bool leftmost, size_t thread_idx) {
+void pdqsort_loop(u32 *begin, u32 *end, bool leftmost, u32 *keys,
+                  u64 *indices) {
     while (true) {
         size_t size = end - begin;
 
         if (size < INSERTION_SORT_THRESHOLD) {
             if (leftmost) {
-                insertion_sort(begin, end, thread_idx);
+                insertion_sort(begin, end, keys, indices);
             } else {
-                unguarded_insertion_sort(begin, end, thread_idx);
+                unguarded_insertion_sort(begin, end, keys, indices);
             }
             return;
         }
 
         size_t s2 = size / 2;
         if (size > NINTHER_THRESHOLD) {
-            sort3(begin, begin + s2, end - 1, thread_idx);
-            sort3(begin + 1, begin + (s2 - 1), end - 2, thread_idx);
-            sort3(begin + 2, begin + (s2 + 1), end - 3, thread_idx);
-            sort3(begin + (s2 - 1), begin + s2, begin + (s2 + 1), thread_idx);
+            sort3(begin, begin + s2, end - 1, keys, indices);
+            sort3(begin + 1, begin + (s2 - 1), end - 2, keys, indices);
+            sort3(begin + 2, begin + (s2 + 1), end - 3, keys, indices);
+            sort3(begin + (s2 - 1), begin + s2, begin + (s2 + 1), keys,
+                  indices);
 
-            swap_u32(begin, begin + s2, thread_idx);
+            swap_u32(begin, begin + s2, keys, indices);
         } else {
-            sort3(begin + s2, begin, end - 1, thread_idx);
+            sort3(begin + s2, begin, end - 1, keys, indices);
         }
 
         // If *(begin - 1) is the end of the right partition of a previous
@@ -352,11 +339,12 @@ void pdqsort_loop(u32 *begin, u32 *end, bool leftmost, size_t thread_idx) {
         // not have to recurse on the left partition, since it's sorted (all
         // equal).
         if (!leftmost && !COMP(*(begin - 1), *begin)) {
-            begin = partition_left(begin, end, thread_idx) + 1;
+            begin = partition_left(begin, end, keys, indices) + 1;
             continue;
         }
 
-        struct partition_result res = partition_right(begin, end, thread_idx);
+        struct partition_result res =
+            partition_right(begin, end, keys, indices);
         u32 *pivot_pos = res.pivot_at;
         bool already_partitioned = res.already_partitioned;
 
@@ -368,31 +356,33 @@ void pdqsort_loop(u32 *begin, u32 *end, bool leftmost, size_t thread_idx) {
             // TODO(yousef): bad_allowed == 0? then sort_heap
 
             if (l_size >= INSERTION_SORT_THRESHOLD) {
-                swap_u32(begin, begin + l_size / 4, thread_idx);
-                swap_u32(pivot_pos - 1, pivot_pos - l_size / 4, thread_idx);
+                swap_u32(begin, begin + l_size / 4, keys, indices);
+                swap_u32(pivot_pos - 1, pivot_pos - l_size / 4, keys, indices);
 
                 if (l_size > NINTHER_THRESHOLD) {
-                    swap_u32(begin + 1, begin + (l_size / 4 + 1), thread_idx);
-                    swap_u32(begin + 2, begin + (l_size / 4 + 2), thread_idx);
-                    swap_u32(pivot_pos - 2, pivot_pos - (l_size / 4 + 1),
-                             thread_idx);
-                    swap_u32(pivot_pos - 3, pivot_pos - (l_size / 4 + 2),
-                             thread_idx);
+                    swap_u32(begin + 1, begin + (l_size / 4 + 1), keys,
+                             indices);
+                    swap_u32(begin + 2, begin + (l_size / 4 + 2), keys,
+                             indices);
+                    swap_u32(pivot_pos - 2, pivot_pos - (l_size / 4 + 1), keys,
+                             indices);
+                    swap_u32(pivot_pos - 3, pivot_pos - (l_size / 4 + 2), keys,
+                             indices);
                 }
             }
 
             if (r_size >= INSERTION_SORT_THRESHOLD) {
-                swap_u32(pivot_pos + 1, pivot_pos + (1 + r_size / 4),
-                         thread_idx);
-                swap_u32(end - 1, end - r_size / 4, thread_idx);
+                swap_u32(pivot_pos + 1, pivot_pos + (1 + r_size / 4), keys,
+                         indices);
+                swap_u32(end - 1, end - r_size / 4, keys, indices);
 
                 if (r_size > NINTHER_THRESHOLD) {
-                    swap_u32(pivot_pos + 2, pivot_pos + (2 + r_size / 4),
-                             thread_idx);
-                    swap_u32(pivot_pos + 3, pivot_pos + (3 + r_size / 4),
-                             thread_idx);
-                    swap_u32(end - 2, end - (1 + r_size / 4), thread_idx);
-                    swap_u32(end - 3, end - (2 + r_size / 4), thread_idx);
+                    swap_u32(pivot_pos + 2, pivot_pos + (2 + r_size / 4), keys,
+                             indices);
+                    swap_u32(pivot_pos + 3, pivot_pos + (3 + r_size / 4), keys,
+                             indices);
+                    swap_u32(end - 2, end - (1 + r_size / 4), keys, indices);
+                    swap_u32(end - 3, end - (2 + r_size / 4), keys, indices);
                 }
             }
 
@@ -400,25 +390,25 @@ void pdqsort_loop(u32 *begin, u32 *end, bool leftmost, size_t thread_idx) {
             // If we were decently balanced and we tried to sort an already
             // partitioned sequence try to use insertion sort.
             if (already_partitioned &&
-                partial_insertion_sort(begin, pivot_pos, thread_idx) &&
-                partial_insertion_sort(pivot_pos + 1, end, thread_idx))
+                partial_insertion_sort(begin, pivot_pos, keys, indices) &&
+                partial_insertion_sort(pivot_pos + 1, end, keys, indices))
                 return;
         }
 
         // Sort the left partition first using recursion and do tail
         // recursion elimination for the right-hand partition.
-        pdqsort_loop(begin, pivot_pos, leftmost, thread_idx);
+        pdqsort_loop(begin, pivot_pos, leftmost, keys, indices);
         begin = pivot_pos + 1;
         leftmost = false;
     }
 }
 
-void pdqsort(u32 *begin, u32 *end, size_t thread_idx) {
+void pdqsort(u32 *begin, u32 *end, u32 *keys, u64 *indices) {
     if (begin == end)
         return;
 
 #define INIT_PDQSORT_CALL true
-    pdqsort_loop(begin, end, INIT_PDQSORT_CALL, thread_idx);
+    pdqsort_loop(begin, end, INIT_PDQSORT_CALL, keys, indices);
 }
 
 #define KiB(n) (n * 1024)
@@ -428,40 +418,39 @@ void pdqsort(u32 *begin, u32 *end, size_t thread_idx) {
 #define INIT_SIZE MiB(1)
 #define ALIGN_PAGE(n) (n % KiB(4) ? n + (KiB(4) - n % KiB(4)) : n)
 
-void init_sorter(size_t len, size_t thread_idx) {
-    struct sorter sorter = sorters[thread_idx];
-
+void init_sorter(size_t len, u32 *keys, u64 *indices) {
     for (u64 i = 0; i < len; ++i) {
-        sorter.indices[i] = i;
+        indices[i] = i;
     }
 }
 
-bool sort_keys(u32 *keys, size_t len, size_t thread_idx) {
-    struct sorter sorter = sorters[thread_idx];
+bool sort_keys(u32 *keys, size_t len, u64 *indices) {
+    init_sorter(len, keys, indices);
 
-    init_sorter(len, thread_idx);
-
-    pdqsort(sorter.keys, sorter.keys + len, thread_idx);
+    pdqsort(keys, keys + len, keys, indices);
     return true;
 }
 
 // quickselect: returns pointer to the kth element
 // for all e between base and &k: e =< k
-u32 *quickselect(u32 *keys, size_t len, size_t count_k, size_t thread_idx) {
-    struct sorter sorter = sorters[thread_idx];
+u32 *quickselect(u32 *keys, size_t len, size_t count_k, u64 *indices) {
 
     u32 *left = keys;
     u32 *right = keys + len;
-    init_sorter(len, thread_idx);
+
+    init_sorter(len, keys, indices);
+
+    // TODO(yousef): how about shuffling things like in pdqsort_loop before
+    // choosing a pivot?
 
     while (true) {
         if (left == right) {
             return left;
         }
 
-        u32 *pivot = partition_left(left, right, thread_idx);
+        u32 *pivot = partition_left(left, right, keys, indices);
 
-        size_t pivot_index = pivot - sorter.keys;
+        size_t pivot_index = pivot - keys;
 
         if (count_k == pivot_index) {
             return pivot;
@@ -573,7 +562,8 @@ struct knn_classifier_t {
 } classifier = {0};
 
 void init_knn() {
-    size_t size = MiB(300);
+    size_t base = MiB(50);
+    size_t size = THREAD_COUNT * MiB(20) + base;
     char *res = (char *)malloc(size);
 
     // touch memory
@@ -584,16 +574,16 @@ void init_knn() {
     knn_memory.stack = res;
     knn_memory.size = size;
 
+    classifier.data = (double *)knn_memory.stack;
+    classifier.labels = (int64_t *)(knn_memory.stack + MiB(10));
+
+    classifier.new_data = (double *)(knn_memory.stack + MiB(20));
+
+    classifier.results = (int64_t *)(knn_memory.stack + MiB(30));
+
     for (size_t i = 0; i < THREAD_COUNT; ++i) {
-        classifier.thread_mem[i] = knn_memory.stack + i * MiB(20);
+        classifier.thread_mem[i] = knn_memory.stack + base + i * MiB(20);
     }
-
-    classifier.data = (double *)(knn_memory.stack + MiB(200));
-    classifier.labels = (int64_t *)(knn_memory.stack + MiB(210));
-
-    classifier.new_data = (double *)(knn_memory.stack + MiB(220));
-
-    classifier.results = (int64_t *)(knn_memory.stack + MiB(230));
 }
 
 int fit(double *source, int64_t *labels, size_t width, size_t height_src,
@@ -632,9 +622,6 @@ void predict_multithreaded(struct predict_params_t params) {
     int64_t *k_labels = memory + MiB(5) + KiB(200);
     u64 *indices = memory + MiB(5) + KiB(400);
 
-    sorters[thread_idx].indices = indices;
-    sorters[thread_idx].keys = (u32 *)distance_mem;
-
     size_t routines_count = params.height_new;
     size_t routines_per_thread = routines_count / THREAD_COUNT;
     size_t leftover_routines = routines_count % THREAD_COUNT;
@@ -654,10 +641,10 @@ void predict_multithreaded(struct predict_params_t params) {
 
         // must compile with fno-strict-aliasing for now
         u32 *keys = (u32 *)distance_mem;
-        quickselect(keys, classifier.height_src, params.k_limit, thread_idx);
+        quickselect(keys, classifier.height_src, params.k_limit, indices);
 
         for (size_t u = 0; u < params.k_limit; ++u) {
-            u64 label_at = sorters[thread_idx].indices[u];
+            u64 label_at = indices[u];
             k_labels[u] = classifier.labels[label_at];
         }
 
@@ -690,11 +677,10 @@ void predict_multithreaded(struct predict_params_t params) {
 
             // must compile with fno-strict-aliasing for now
             u32 *keys = (u32 *)distance_mem;
-            quickselect(keys, classifier.height_src, params.k_limit,
-                        thread_idx);
+            quickselect(keys, classifier.height_src, params.k_limit, indices);
 
             for (size_t u = 0; u < params.k_limit; ++u) {
-                u64 label_at = sorters[thread_idx].indices[u];
+                u64 label_at = indices[u];
                 k_labels[u] = classifier.labels[label_at];
             }
 
@@ -724,6 +710,7 @@ int64_t *predict(double *new_data, size_t width, size_t height_new,
                  size_t k_limit) {
     memcpy(classifier.new_data, new_data, height_new * width * sizeof(double));
 
+#if defined(FEATURE_MULTITHREADED)
     HANDLE threads[THREAD_COUNT] = {0};
 
     struct predict_params_t parameters[THREAD_COUNT] = {0};
@@ -743,6 +730,45 @@ int64_t *predict(double *new_data, size_t width, size_t height_new,
     for (size_t thread_idx = 0; thread_idx < THREAD_COUNT; thread_idx += 1) {
         WaitForMultipleObjects(THREAD_COUNT, threads, true, INFINITE);
     }
+#else
+    char *memory = classifier.thread_mem[0];
+    float *distance_mem = memory;
+    size_t *label_counts = memory + MiB(5);
+    int64_t *k_labels = memory + MiB(5) + KiB(200);
+    u64 *indices = memory + MiB(5) + KiB(400);
 
+    for (size_t i = 0; i < height_new; ++i) {
+        memset(label_counts, '\0', classifier.max_label * sizeof(size_t));
+
+        double *vector = new_data + i * width;
+
+        distance_loop(distance_mem, classifier.data, vector,
+                      classifier.width_src, classifier.height_src);
+
+        // must compile with fno-strict-aliasing for now
+        u32 *keys = (u32 *)distance_mem;
+        quickselect(keys, classifier.height_src, k_limit, indices);
+
+        for (size_t u = 0; u < k_limit; ++u) {
+            u64 label_at = indices[u];
+            k_labels[u] = classifier.labels[label_at];
+        }
+
+        size_t best_count = 0;
+        int64_t best_label = (-1);
+
+        for (size_t u = 0; u < k_limit; ++u) {
+            int64_t label = k_labels[u];
+            label_counts[label]++;
+
+            if (label_counts[label] > best_count) {
+                best_count = label_counts[label];
+                best_label = label;
+            }
+        }
+
+        classifier.results[i] = best_label;
+    }
+#endif
     return classifier.results;
 }
