@@ -37,6 +37,16 @@ The file is split into sections marked by comments. Searching for "SECTION"
 should help you navigate.
 
 Note 1:
+The flag FEATURE_MULTITHREADED can be passed to the compiler driver. It is used
+to selectively compile parts of the code and to turn on or off multithreading.
+While the code appears to have some redundant parts, these never get compiled.
+
+Note 2:
+The code uses neither locking nor atomic instructions. Because of the layout of
+the data, no two threads write to the same memory.
+I believe it's a neat solution.
+
+Note 3:
 'The IEE754 standard was deliberately made such that positive floating-point
 numbers can be sorted as integers (both in the 32 and 64 bit format).'
 (Source:
@@ -45,7 +55,7 @@ https://www.researchgate.net/publication/342347690_RadixInsert_a_much_faster_sta
 A given euclidean distance can only ever be positive.
 Therefore, we may sort the array of distances as if they were integers.
 
-Note 2:
+Note 4:
 A full sort of the keys (distances) is not employed, instead I use the partition
 routine to implement quickselect (the pseudocode of which is taken from
 wikipedia).
