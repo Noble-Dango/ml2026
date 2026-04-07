@@ -62,8 +62,9 @@ develop the classifier and later for testing.
 typedef uint32_t u32;
 typedef uint64_t u64;
 
+#if !defined(THREAD_COUNT)
 #define THREAD_COUNT 8
-
+#endif 
 /**********************************************/
 /* SECTION SORTING */
 /**********************************************/
@@ -599,11 +600,6 @@ int fit(double *source, int64_t *labels, size_t width, size_t height_src,
     return (1);
 }
 
-#ifdef _WIN32
-#include <Windows.h>
-#else
-#endif
-
 struct predict_params_t {
     double *new_data;
     size_t width;
@@ -611,6 +607,22 @@ struct predict_params_t {
     size_t k_limit;
     size_t thread_idx;
 };
+
+
+void predict_multithreaded(struct predict_params_t params);
+
+#ifdef _WIN32
+#include <Windows.h>
+DWORD WINAPI StartWorkWin32(LPVOID lpParameter) {
+    predict_multithreaded(*(struct predict_params_t *)lpParameter);
+}
+#else
+#include <pthread.h>
+void* StartWorkPOSIX(void* params) {
+    predict_multithreaded(*(struct predict_params_t *)params);
+    return NULL;
+}
+#endif
 
 // correct labels stored at classifier.results
 void predict_multithreaded(struct predict_params_t params) {
@@ -702,15 +714,12 @@ void predict_multithreaded(struct predict_params_t params) {
     }
 }
 
-DWORD WINAPI StartWorkWin32(LPVOID lpParameter) {
-    predict_multithreaded(*(struct predict_params_t *)lpParameter);
-}
-
 int64_t *predict(double *new_data, size_t width, size_t height_new,
                  size_t k_limit) {
     memcpy(classifier.new_data, new_data, height_new * width * sizeof(double));
 
 #if defined(FEATURE_MULTITHREADED)
+#if defined(_WIN32)
     HANDLE threads[THREAD_COUNT] = {0};
 
     struct predict_params_t parameters[THREAD_COUNT] = {0};
@@ -730,7 +739,27 @@ int64_t *predict(double *new_data, size_t width, size_t height_new,
     for (size_t thread_idx = 0; thread_idx < THREAD_COUNT; thread_idx += 1) {
         WaitForMultipleObjects(THREAD_COUNT, threads, true, INFINITE);
     }
-#else
+#else // POSIX: https://pages.cs.wisc.edu/~remzi/OSTEP/threads-api.pdf
+    pthread_t threads[THREAD_COUNT] = {0};
+
+    struct predict_params_t parameters[THREAD_COUNT] = {0};
+
+    for (size_t thread_idx = 0; thread_idx < THREAD_COUNT; thread_idx += 1) {
+        parameters[thread_idx].new_data = classifier.new_data;
+        parameters[thread_idx].width = width;
+        parameters[thread_idx].height_new = height_new;
+        parameters[thread_idx].k_limit = k_limit;
+        parameters[thread_idx].thread_idx = thread_idx;
+
+        threads[thread_idx] = (pthread_t) {0};
+	int res = pthread_create(&threads[thread_idx], NULL, StartWorkPOSIX, &parameters[thread_idx]);
+    }
+
+    for (size_t thread_idx = 0; thread_idx < THREAD_COUNT; thread_idx += 1) {
+	    pthread_join(threads[thread_idx], NULL);
+    }
+#endif // win or posix
+#else // single threaded
     char *memory = classifier.thread_mem[0];
     float *distance_mem = memory;
     size_t *label_counts = memory + MiB(5);
