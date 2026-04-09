@@ -203,16 +203,17 @@ struct knn_classifier_t {
 
 static void init_knn() {
     size_t base = MiB(50);
-    size_t size = THREAD_COUNT * MiB(20) + base;
-    char *res = (char *)malloc(size);
+    if (knn_memory.stack == NULL) {
+        size_t size = THREAD_COUNT * MiB(20) + base;
+        char *res = (char *)malloc(size);
 
-    // touch memory
-    for (size_t i = 0; i < size; ++i) {
-        res[i] = 0;
+        // touch memory
+        for (size_t i = 0; i < size; ++i) {
+            res[i] = 0;
+        }
+        knn_memory.stack = res;
+        knn_memory.size = size;
     }
-
-    knn_memory.stack = res;
-    knn_memory.size = size;
 
     classifier.data = (double *)knn_memory.stack;
     classifier.labels = (int64_t *)(knn_memory.stack + MiB(10));
